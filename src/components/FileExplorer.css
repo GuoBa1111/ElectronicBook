@@ -1,0 +1,282 @@
+/* 更新CSS变量以与EditorView保持一致 */
+:root {
+  --primary-color: #4285f4;
+  --secondary-color: #34a853;
+  --text-color: #333333;
+  --light-text: #5f6368;
+  --background-color: #ffffff;
+  --light-background: #f8f9fa;
+  --hover-background: #e8f0fe;
+  --selected-background: #e6f7ff;
+  --border-color: #dadce0;
+  --shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+
+.file-explorer {
+  width: 280px; /* 增加宽度以提供更多空间 */
+  height: 100%;
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  background-color: var(--background-color);
+  box-shadow: var(--shadow);
+  /* 添加以下属性使所有文字不可选中 */
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+.file-explorer-header, .file-explorer-header-readonly {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background-color: var(--light-background);
+}
+
+.header-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.header-title-and-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--primary-color);
+  margin: 0;
+  white-space: nowrap;
+}
+
+.current-folder {
+  font-size: 13px;
+  color: var(--light-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.file-item {
+  padding: 3px 0;
+  position: relative;
+}
+
+.file-item > div {
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: all 0.2s ease;
+  font-size: 14px;
+  color: var(--text-color);
+}
+
+.file-item > div:hover {
+  background-color: var(--hover-background);
+}
+
+
+/* 调整子文件夹缩进和连接线样式 */
+.file-explorer :deep(.sub-folder) {
+  padding-left: 20px !important;
+  display: block !important;
+  border-left: 1px dashed var(--border-color);
+  margin-left: 10px;
+  position: relative;
+}
+
+.file-explorer :deep(.sub-folder)::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20px;
+  width: 10px;
+  height: 1px;
+  background-color: var(--border-color);
+}
+
+/* 空状态样式优化 */
+.empty-state {
+  text-align: center;
+  color: var(--light-text);
+  padding: 40px 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.empty-icon {
+  font-size: 48px;
+  opacity: 0.5;
+}
+
+.empty-message {
+  font-weight: 500;
+}
+
+.empty-hint {
+  font-size: 12px;
+  color: #757575;
+}
+
+.folder-path-input-container {
+  display: flex;
+  margin-top: 10px;
+}
+
+.folder-path-input {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px 0 0 4px;
+  font-size: 14px;
+}
+
+.select-folder-btn {
+  padding: 8px 16px;
+  background-color: #42b983;
+  color: white;
+  border: none;
+  border-radius: 0 4px 4px 0;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.select-folder-btn:hover {
+  background-color: #3aa876;
+}
+
+.file-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.file-item {
+  padding: 5px 0;
+  position: relative;
+}
+
+.file-item > div {
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-item > div:hover {
+  background-color: #f5f5f5;
+}
+
+.file-explorer .file-list .file-item > div.selected {
+  /* 保持基础样式，但移除!important标记 */
+  background-color: rgba(255, 255, 255, 0.9);
+  border: 2px solid var(--primary-color);
+  border-radius: 6px;
+  color: var(--primary-color);
+  font-weight: 600;
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+/* 调整子文件夹缩进 - 减小间距 */
+.file-explorer :deep(.sub-folder) {
+  padding-left: 20px !important; /* 减小缩进 */
+  display: block !important;
+  border-left: 1px dashed #ccc;
+  margin-left: 10px; /* 减小左边距 */
+  position: relative;
+}
+
+/* 调整层级指示器 */
+.file-explorer :deep(.sub-folder)::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20px;
+  width: 10px;
+  height: 1px;
+  background-color: #ccc;
+}
+
+/* 为嵌套层级调整样式 */
+.file-explorer :deep(.sub-folder .sub-folder) {
+  padding-left: 15px !important;
+  margin-left: 15px;
+}
+
+.file-explorer :deep(.sub-folder .sub-folder)::before {
+  width: 15px;
+}
+
+/* 文件图标样式 */
+.file-item .icon {
+  width: 16px;
+  text-align: center;
+  display: inline-block;
+}
+
+
+/* 空状态样式 */
+.empty-state {
+  text-align: center;
+  color: #999;
+  padding: 30px 10px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* 文件操作工具栏样式 */
+.file-operations-toolbar {
+  display: flex;
+  padding: 0;
+  border: none;
+  background-color: transparent;
+}
+
+.toolbar-btn {
+  margin: 0 1px; /* 减小按钮间距 */
+  padding: 6px 6px; /* 减小按钮大小 */
+  background-color: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px; /* 调整文字大小 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px; /* 调整图标与文字间距 */
+  transition: all 0.2s ease;
+  min-width: fit-content;
+}
+
+.toolbar-btn:hover {
+  background-color: #3367d6;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.hidden-file-input {
+  display: none;
+}
