@@ -1,19 +1,148 @@
 from flask import Flask, request, jsonify, send_from_directory
 import os
+import sys
 import json
 import uuid
 import time
 import shutil  # 添加shutil模块用于删除文件夹
 from datetime import datetime
 import subprocess
+import requests
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import SERVER_CONFIG
 
 app = Flask(__name__)
-PORT = 3000
-DATA_FOLDER = os.path.join(os.path.dirname(__file__), '..', 'data')
+host = SERVER_CONFIG['host']
+PORT = SERVER_CONFIG['port']
 
-# 确保data文件夹存在
+# 构建基础URL
+base_url = f'http://{host}:{PORT}'
+DATA_FOLDER = os.path.join(os.path.dirname(__file__), '..', 'data')
+PIC_FOLDER = os.path.join(DATA_FOLDER, 'pic')  # 新增：图片保存文件夹
+
+# 确保data和pic文件夹存在
 if not os.path.exists(DATA_FOLDER):
     os.makedirs(DATA_FOLDER, exist_ok=True)
+if not os.path.exists(PIC_FOLDER):  # 新增：确保pic文件夹存在
+    os.makedirs(PIC_FOLDER, exist_ok=True)
+
+# 新增：上传图片文件API (用于处理编辑器内粘贴或拖入的图片)
+@app.route('/api/upload-image', methods=['POST'])
+def upload_image():
+    # 检查是否有文件上传
+    if 'file[]' not in request.files:
+        return jsonify({
+            'msg': '没有文件上传',
+            'code': 1,
+            'data': {'errFiles': [], 'succMap': {}}
+        }), 400
+
+    files = request.files.getlist('file[]')
+    succ_map = {}
+    err_files = []
+
+    for file in files:
+        if file.filename == '':
+            err_files.append('')
+            continue
+
+        try:
+            # 生成唯一文件名
+            ext = os.path.splitext(file.filename)[1].lower()
+            print(f'文件扩展名: {ext}')  # 调试信息
+            if ext not in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
+                err_files.append(file.filename)
+                print(f'文件格式不支持: {file.filename}, 扩展名: {ext}')  # 调试信息
+                continue
+
+            unique_filename = f'{str(uuid.uuid4())[:8]}{ext}'  # 修复UUID使用问题
+            save_path = os.path.join(PIC_FOLDER, unique_filename)
+            print(f'保存路径: {save_path}')  # 调试信息
+
+            # 检查目录是否存在且可写
+            if not os.path.exists(os.path.dirname(save_path)):
+                print(f'目录不存在: {os.path.dirname(save_path)}')
+                os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                print(f'已创建目录: {os.path.dirname(save_path)}')
+
+            # 保存文件
+            file.save(save_path)
+            print(f'文件保存成功: {save_path}')  # 调试信息
+
+            # 生成访问URL，使用与前端相同的IP地址
+            image_url = f'{base_url}/api/get-image/{unique_filename}'
+            succ_map[file.filename] = image_url
+        except Exception as e:
+            print(f'上传图片失败: {str(e)}')
+            err_files.append(file.filename)
+
+    return jsonify({
+        'msg': '',
+        'code': 0,
+        'data': {
+            'errFiles': err_files,
+            'succMap': succ_map
+        }
+    })
+
+# 新增：从URL上传图片API (用于处理站外图片地址)
+@app.route('/api/upload-image-from-url', methods=['POST'])
+def upload_image_from_url():
+    data = request.json
+    url = data.get('url')
+
+    if not url:
+        return jsonify({
+            'msg': '图片URL不能为空',
+            'code': 1,
+            'data': {}
+        }), 400
+
+    try:
+        # 下载图片
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+
+        # 获取文件扩展名
+        ext = os.path.splitext(url.split('?')[0])[1].lower()
+        if not ext or ext not in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
+            ext = '.png'  # 默认使用png格式
+
+        # 生成唯一文件名
+        unique_filename = f'{str(uuid.uuid4())[:8]}{ext}'  # 修复UUID使用问题
+        save_path = os.path.join(PIC_FOLDER, unique_filename)
+
+        # 保存图片
+        with open(save_path, 'wb') as f:
+            f.write(response.content)
+
+        # 生成访问URL
+        image_url = f'{base_url}/api/get-image/{unique_filename}'
+
+        return jsonify({
+            'msg': '',
+            'code': 0,
+            'data': {
+                'originalURL': url,
+                'url': image_url
+            }
+        })
+    except Exception as e:
+        print(f'从URL上传图片失败: {str(e)}')
+        return jsonify({
+            'msg': str(e),
+            'code': 1,
+            'data': {}
+        }), 500
+
+# 新增：获取图片API
+@app.route('/api/get-image/<filename>')
+def get_image(filename):
+    try:
+        return send_from_directory(PIC_FOLDER, filename)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 404
 
 # 允许跨域
 @app.after_request
@@ -489,6 +618,88 @@ def delete_item():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# 新增：编辑会话API (修改文件夹名称)
+@app.route('/api/edit-session', methods=['POST'])
+def edit_session():
+    data = request.json
+    session_id = data.get('sessionId')
+    new_name = data.get('newName')
+
+    if not session_id or not new_name:
+        return jsonify({'error': '会话ID和新名称不能为空'}), 400
+
+    try:
+        # 查找会话文件
+        session_file = os.path.join(DATA_FOLDER, f'{session_id}.json')
+
+        if not os.path.exists(session_file):
+            return jsonify({'error': '会话不存在'}), 404
+
+        # 读取会话数据
+        with open(session_file, 'r', encoding='utf-8') as f:
+            session_data = json.load(f)
+
+        # 获取原始文件夹路径
+        old_folder_path = session_data['folderPath']
+
+        # 检查文件夹是否存在
+        if not os.path.exists(old_folder_path):
+            return jsonify({'error': '关联的文件夹不存在'}), 404
+
+        # 获取文件夹的父路径
+        parent_path = os.path.dirname(old_folder_path)
+
+        # 构建新的文件夹路径
+        new_folder_path = os.path.join(parent_path, new_name)
+
+        # 检查新名称的文件夹是否已存在
+        if os.path.exists(new_folder_path):
+            return jsonify({'error': '该名称的文件夹已存在'}), 400
+
+        # 重命名文件夹
+        os.rename(old_folder_path, new_folder_path)
+
+        # 更新会话数据
+        session_data['folderPath'] = new_folder_path
+
+        # 重新读取文件夹结构
+        session_data['structure'] = read_folder_structure(new_folder_path)
+
+        # 保存更新后的会话数据
+        with open(session_file, 'w', encoding='utf-8') as f:
+            json.dump(session_data, f, ensure_ascii=False, indent=2)
+
+        return jsonify({'success': True, 'message': '会话更新成功', 'newFolderPath': new_folder_path})
+    except PermissionError:
+        return jsonify({'error': '权限不足，无法重命名文件夹'}), 403
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# 新增：删除会话API (只删除会话记录，不删除实际文件)
+@app.route('/api/delete-session', methods=['POST'])
+def delete_session():
+    data = request.json
+    session_id = data.get('sessionId')
+
+    if not session_id:
+        return jsonify({'error': '会话ID不能为空'}), 400
+
+    try:
+        # 查找会话文件
+        session_file = os.path.join(DATA_FOLDER, f'{session_id}.json')
+
+        if not os.path.exists(session_file):
+            return jsonify({'error': '会话不存在'}), 404
+
+        # 删除会话文件
+        os.remove(session_file)
+
+        return jsonify({'success': True, 'message': '会话已成功删除'})
+    except PermissionError:
+        return jsonify({'error': '权限不足，无法删除会话文件'}), 403
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
-    print(f'服务器运行在 http://localhost:{PORT}')
+    print(f'服务器运行在 http://{base_url}')
     app.run(host='0.0.0.0', port=PORT, debug=True)

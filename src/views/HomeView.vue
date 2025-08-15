@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { SERVER_CONFIG } from '../../config.js'  // 导入配置
 
 const folderPathInput = ref('')
 const router = useRouter()
@@ -21,7 +22,7 @@ const getLastFolderName = (path) => {
 // 新增：获取所有会话
 const getAllSessions = async () => {
   try {
-    const response = await fetch('http://192.168.177.225:3000/api/get-all-sessions')
+    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/get-all-sessions`)
     if (!response.ok) {
       throw new Error('获取会话列表失败')
     }
@@ -45,7 +46,7 @@ const readFolder = async () => {
   }
 
   try {
-    const response = await fetch('http://192.168.177.225:3000/api/create-folder-session', {
+    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/create-folder-session`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -71,6 +72,59 @@ const readFolder = async () => {
 // 新增：点击会话跳转
 const goToSession = (sessionId) => {
   router.push({ name: 'editor', params: { id: sessionId } })
+}
+
+// 新增：编辑会话名称
+const editSession = async (session) => {
+  const currentName = getLastFolderName(session.folderPath)
+  const newName = prompt('请输入新的文件夹名称:', currentName)
+  if (newName !== null && newName.trim() !== '') {
+    try {
+      const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/edit-session`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          sessionId: session.sessionId,
+          newName: newName
+        })
+      })
+      if (!response.ok) {
+        throw new Error('更新会话名称失败')
+      }
+      // 更新本地会话列表
+      getAllSessions()
+    } catch (error) {
+      console.error('编辑会话错误:', error)
+      alert('编辑会话失败: ' + error.message)
+    }
+  }
+}
+
+// 新增：删除会话
+const deleteSession = async (session) => {
+  if (confirm('确定要删除这个文件夹会话吗?')) {
+    try {
+      const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/delete-session`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          sessionId: session.sessionId
+        })
+      })
+      if (!response.ok) {
+        throw new Error('删除会话失败')
+      }
+      // 更新本地会话列表
+      getAllSessions()
+    } catch (error) {
+      console.error('删除会话错误:', error)
+      alert('删除会话失败: ' + error.message)
+    }
+  }
 }
 
 </script>
@@ -99,6 +153,10 @@ const goToSession = (sessionId) => {
               <path d="M928 224H832v-64c0-17.7-14.3-32-32-32H192c-17.7 0-32 14.3-32 32v576c0 17.7 14.3 32 32 32h192v64c0 17.7 14.3 32 32 32h384c17.7 0 32-14.3 32-32v-64h96c17.7 0 32-14.3 32-32V256c0-17.7-14.3-32-32-32zM896 800h-64v-64c0-17.7-14.3-32-32-32H320c-17.7 0-32 14.3-32 32v64H160V160h576v64h160v576z"></path>
             </svg>
             <div class="session-path">{{ getLastFolderName(session.folderPath) }}</div>
+            <div class="session-actions">
+              <button @click.stop="editSession(session)" class="edit-btn">✏️</button>
+              <button @click.stop="deleteSession(session)" class="delete-btn">🗑️</button>
+            </div>
           </li>
         </ul>
         <div class="empty-state" v-if="sessions.length === 0">
@@ -145,7 +203,7 @@ const goToSession = (sessionId) => {
   --background-color: #f8f9fa;
   --card-bg: #fff;
   --hover-color: #f5f5f5;
-  --sidebar-width: 280px;
+  --sidebar-width: 450px;
 }
 
 .home-container {
@@ -189,7 +247,7 @@ const goToSession = (sessionId) => {
 }
 
 .sidebar {
-  width: var(--sidebar-width);
+  width:  350px ;
   background-color: var(--card-bg);
   border-right: 1px solid var(--border-color);
   display: flex;
@@ -235,6 +293,9 @@ const goToSession = (sessionId) => {
   align-items: center;
   background-color: var(--card-bg);
   border: 1px solid var(--border-color);
+  width: 100%; /* 确保会话项宽度固定 */
+  box-sizing: border-box; /* 包含padding和border在宽度内 */
+  position: relative;
 }
 
 .session-item:hover {
@@ -253,6 +314,36 @@ const goToSession = (sessionId) => {
   color: var(--text-color);
   word-break: break-all;
   flex: 1;
+}
+
+/* 新增：会话操作按钮样式 */
+.session-actions {
+  display: none; /* 保持隐藏，只在悬停时显示 */
+  position: absolute; /* 使用绝对定位 */
+  right: 16px; /* 固定在右侧 */
+  top: 50%; /* 垂直居中 */
+  transform: translateY(-50%); /* 精确垂直居中 */
+  gap: 8px;
+  white-space: nowrap;
+}
+
+
+.session-item:hover .session-actions {
+  display: flex;
+}
+
+.edit-btn, .delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.edit-btn:hover, .delete-btn:hover {
+  background-color: var(--hover-color);
 }
 
 .empty-state {

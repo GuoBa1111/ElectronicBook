@@ -2,6 +2,7 @@
 import { ref, onMounted, defineComponent, watch } from 'vue'
 // 导入ElMessage
 import { ElMessage, ElTooltip } from 'element-plus'
+import { SERVER_CONFIG } from '../../config.js'  // 导入配置
 
 const props = defineProps({
   initialFiles: { type: Array, default: () => [] },
@@ -91,7 +92,7 @@ const selectFile = async (file) => {
     try {
       // 调用后端API获取文件内容
       const response = await fetch(
-        `http://192.168.177.225:3000/api/file-content?filePath=${encodeURIComponent(file.filePath)}`
+        `${SERVER_CONFIG.baseUrl}/api/file-content?filePath=${encodeURIComponent(file.filePath)}`
       )
 
       if (!response.ok) {
@@ -218,7 +219,7 @@ const createNewFile = async () => {
   }
 
   try {
-    const response = await fetch('http://192.168.177.225:3000/api/create-file', {
+    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/create-file`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -254,7 +255,7 @@ const createNewFolder = async () => {
   const currentPath = getCurrentOperationPath()
 
   try {
-    const response = await fetch('http://192.168.177.225:3000/api/create-folder', {
+    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/create-folder`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -307,7 +308,7 @@ const handleFileUpload = async (event) => {
     formData.append('file', file)
     formData.append('folderPath', currentPath)
 
-    const response = await fetch('http://192.168.177.225:3000/api/upload-file', {
+    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/upload-file`, {
       method: 'POST',
       body: formData
     })
@@ -356,7 +357,7 @@ const refreshFileTree = async () => {
       return;
     }
 
-    const response = await fetch('http://192.168.177.225:3000/api/read-folder', {
+    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/read-folder`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -438,7 +439,7 @@ const deleteSelectedItem = async () => {
   if (!isConfirmed) return;
 
   try {
-    const response = await fetch('http://192.168.177.225:3000/api/delete-item', {
+    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/delete-item`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

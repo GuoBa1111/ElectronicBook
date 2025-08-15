@@ -1,4 +1,6 @@
 <script setup>
+
+import { SERVER_CONFIG } from '../config.js';  // 导入配置
 import { ref, inject, onMounted, onUnmounted, watch } from 'vue'
 import FileExplorer from './components/FileExplorer.vue'
 
@@ -24,7 +26,7 @@ const saveFileToBackend = async () => {
   }
 
   try {
-    const response = await fetch('http://192.168.177.225:3000/api/save-file', {
+    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/save-file`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

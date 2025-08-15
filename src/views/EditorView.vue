@@ -1,9 +1,9 @@
 <script setup>
+import { SERVER_CONFIG } from '../../config.js'  // 导入配置
 import { ref, inject, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'  // 修改：添加useRouter导入
 import FileExplorer from '../components/FileExplorer.vue'
 import { ElMessage } from 'element-plus'
-
 
 const route = useRoute()
 const router = useRouter()  // 添加：创建router实例
@@ -31,7 +31,7 @@ const goToHome = () => {
 // 加载会话数据
 const loadSessionData = async () => {
   try {
-    const response = await fetch(`http://192.168.177.225:3000/api/get-folder-session?id=${sessionId.value}`)
+    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/get-folder-session?id=${sessionId.value}`)
     if (!response.ok) {
       if (response.status === 404) {
         throw new Error(`会话ID '${sessionId.value}' 不存在`)
@@ -74,7 +74,7 @@ const saveFileToBackend = async () => {
   }
 
   try {
-    const response = await fetch('http://192.168.177.225:3000/api/save-file', {
+    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/save-file`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -108,16 +108,16 @@ const saveFileToBackend = async () => {
   }
 }
 
-// 导出电子书
+//发布电子书
 const exportBook = async () => {
   try {
     ElMessage({
-      message: '正在导出...',
+      message: '正在发布...',
       type: 'info',
       duration: 2000
     });
 
-    const response = await fetch('http://192.168.177.225:3000/api/export-book', {
+    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/export-book`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -128,27 +128,27 @@ const exportBook = async () => {
     });
 
     if (!response.ok) {
-      throw new Error('导出失败')
+      throw new Error('发布失败')
     }
 
     const data = await response.json();
 
     if (data.success) {
       ElMessage({
-        message: '导出成功!',
+        message: '发布成功!',
         type: 'success',
         duration: 3000
       });
     } else {
       ElMessage({
-        message: '导出失败: ' + data.error,
+        message: '发布失败: ' + data.error,
         type: 'error'
       });
     }
   } catch (error) {
-    console.error('导出错误:', error);
+    console.error('发布错误:', error);
     ElMessage({
-      message: '导出失败: ' + error.message,
+      message: '发布失败: ' + error.message,
       type: 'error'
     });
   }
@@ -165,6 +165,49 @@ onMounted(async () => {
     mode: 'sv',
     preview: {
       delay: 0
+    },
+    upload: {
+      url: `${SERVER_CONFIG.baseUrl}/api/upload-image`,
+      fieldName: 'file[]',
+      maxSize: 1024 * 1024 * 10, // 10MB
+      accept: 'image/*',
+      multiple: false,
+      // 上传成功回调
+      success: (editor, result) => {
+        console.log('上传结果:', result);
+        try {
+          const res = JSON.parse(result);
+          if (res.code === 0) {
+            if (Object.keys(res.data.succMap).length > 0) {
+              // 获取第一个成功上传的图片URL
+              const firstFileName = Object.keys(res.data.succMap)[0];
+              const imageUrl = res.data.succMap[firstFileName];
+              // 插入图片到编辑器 - 使用insertValue方法
+              //const imgMarkdown = `![图片](${imageUrl})`
+
+              editorRef.value.insertValue('<', true);
+              editorRef.value.insertValue('img src=', true);
+              editorRef.value.insertValue(imageUrl, true);
+              editorRef.value.insertValue(' width=500 height=300>', true);
+              ElMessage({ message: '图片上传成功', type: 'success' });
+            } else if (res.data.errFiles && res.data.errFiles.length > 0) {
+              ElMessage({ message: `图片上传失败: ${res.data.errFiles.join(', ')}`, type: 'error' });
+            } else {
+              ElMessage({ message: '图片上传失败: 未知错误', type: 'error' });
+            }
+          } else {
+            ElMessage({ message: '图片上传失败: ' + (res.msg || '服务器错误'), type: 'error' });
+          }
+        } catch (e) {
+          console.error('解析上传结果失败:', e);
+          ElMessage({ message: '图片上传失败: 服务器返回格式错误', type: 'error' });
+        }
+      },
+      // 上传错误回调
+      error: (editor, err) => {
+        console.error('上传错误:', err);
+        ElMessage({ message: '图片上传失败: ' + (err || '网络错误'), type: 'error' });
+      }
     },
     input: (value) => {
       if (currentFile.value) {
