@@ -127,6 +127,12 @@ const deleteSession = async (session) => {
   }
 }
 
+// 新增：预览会话
+const previewSession = (session) => {
+  const previewUrl = `http://${SERVER_CONFIG['host']}/${session.sessionId}/_book`;
+  window.open(previewUrl, '_blank');
+}
+
 </script>
 <template>
   <div class="home-container">
@@ -154,6 +160,7 @@ const deleteSession = async (session) => {
             </svg>
             <div class="session-path">{{ getLastFolderName(session.folderPath) }}</div>
             <div class="session-actions">
+              <button @click.stop="previewSession(session)" class="preview-btn">👁️</button>
               <button @click.stop="editSession(session)" class="edit-btn">✏️</button>
               <button @click.stop="deleteSession(session)" class="delete-btn">🗑️</button>
             </div>
@@ -332,7 +339,7 @@ const deleteSession = async (session) => {
   display: flex;
 }
 
-.edit-btn, .delete-btn {
+.preview-btn, .edit-btn, .delete-btn {
   background: none;
   border: none;
   cursor: pointer;
@@ -342,7 +349,7 @@ const deleteSession = async (session) => {
   transition: background-color 0.2s;
 }
 
-.edit-btn:hover, .delete-btn:hover {
+.edit-btn:hover, .delete-btn:hover, .preview-btn:hover {
   background-color: var(--hover-color);
 }
 

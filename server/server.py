@@ -1,4 +1,3 @@
-from flask import Flask, request, jsonify, send_from_directory
 import os
 import sys
 import json
@@ -8,6 +7,7 @@ import shutil  # 添加shutil模块用于删除文件夹
 from datetime import datetime
 import subprocess
 import requests
+from flask import Flask, request, jsonify, send_from_directory
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import SERVER_CONFIG
@@ -157,19 +157,21 @@ def after_request(response):
 def get_all_sessions():
     try:
         sessions = []
-        # 遍历data文件夹中的所有json文件
-        for file in os.listdir(DATA_FOLDER):
-            if file.endswith('.json'):
-                file_path = os.path.join(DATA_FOLDER, file)
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    session_data = json.load(f)
-                    # 检查文件夹是否仍然存在
-                    if os.path.exists(session_data['folderPath']):
-                        sessions.append({
-                            'sessionId': session_data['sessionId'],
-                            'folderPath': session_data['folderPath'],
-                            'createdAt': session_data['createdAt']
-                        })
+        # 遍历data文件夹中的所有子文件夹
+        for folder in os.listdir(DATA_FOLDER):
+            folder_path = os.path.join(DATA_FOLDER, folder)
+            if os.path.isdir(folder_path):
+                session_file = os.path.join(folder_path, 'session.json')
+                if os.path.exists(session_file):
+                    with open(session_file, 'r', encoding='utf-8') as f:
+                        session_data = json.load(f)
+                        # 检查文件夹是否仍然存在
+                        if os.path.exists(session_data['folderPath']):
+                            sessions.append({
+                                'sessionId': session_data['sessionId'],
+                                'folderPath': session_data['folderPath'],
+                                'createdAt': session_data['createdAt']
+                            })
         return jsonify({'sessions': sessions})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -226,6 +228,10 @@ def create_folder_session():
         # 生成唯一ID
         session_id = str(uuid.uuid4())[:8]
 
+        # 创建会话文件夹
+        session_folder = os.path.join(DATA_FOLDER, session_id)
+        os.makedirs(session_folder, exist_ok=True)
+
         # 保存会话数据
         session_data = {
             'sessionId': session_id,
@@ -234,7 +240,7 @@ def create_folder_session():
             'createdAt': datetime.now().isoformat()
         }
 
-        with open(os.path.join(DATA_FOLDER, f'{session_id}.json'), 'w', encoding='utf-8') as f:
+        with open(os.path.join(session_folder, 'session.json'), 'w', encoding='utf-8') as f:
             json.dump(session_data, f, ensure_ascii=False, indent=2)
 
         return jsonify({'sessionId': session_id})
@@ -250,8 +256,14 @@ def get_folder_session():
         return jsonify({'error': '会话ID不能为空'}), 400
 
     try:
+        # 查找会话文件夹
+        session_folder = os.path.join(DATA_FOLDER, session_id)
+
+        if not os.path.exists(session_folder) or not os.path.isdir(session_folder):
+            return jsonify({'error': '会话不存在'}), 404
+
         # 查找会话文件
-        session_file = os.path.join(DATA_FOLDER, f'{session_id}.json')
+        session_file = os.path.join(session_folder, 'session.json')
 
         if not os.path.exists(session_file):
             return jsonify({'error': '会话不存在'}), 404
@@ -390,7 +402,8 @@ def export_book():
 
     try:
         # 查找会话文件
-        session_file = os.path.join(DATA_FOLDER, f'{session_id}.json')
+        SESSION_FOLDER = os.path.join(DATA_FOLDER, session_id)  # 新增：会话文件夹
+        session_file = os.path.join(SESSION_FOLDER, f'session.json')
 
         if not os.path.exists(session_file):
             return jsonify({'error': '会话不存在'}), 404
@@ -421,27 +434,39 @@ def export_book():
                 'error': f'gitbook build失败: {process.stderr}'
             }), 500
 
+        # 新增：移动_book文件夹到data目录下对应的会话文件夹
+        # 构建源_book文件夹路径
+        source_book_folder = os.path.join(folder_path, '_book')
+        if not os.path.exists(source_book_folder):
+            return jsonify({
+                'success': False,
+                'error': '_book文件夹不存在，请检查gitbook build是否成功'
+            }), 500
+
+        # 构建目标文件夹路径 (data/{session_id})
+        target_session_folder = os.path.join(DATA_FOLDER, session_id)
+        os.makedirs(target_session_folder, exist_ok=True)
+
+        # 构建目标_book文件夹路径
+        target_book_folder = os.path.join(target_session_folder, '_book')
+
+        # 如果目标_book文件夹已存在，则先删除
+        if os.path.exists(target_book_folder):
+            shutil.rmtree(target_book_folder)
+
+        # 移动_book文件夹
+        shutil.move(source_book_folder, target_session_folder)
+
         return jsonify({
             'success': True,
             'message': '导出成功',
-            'output': process.stdout
+            'output': process.stdout,
+            'book_path': target_book_folder
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# 修改通配符路由，返回dist文件夹中的index.html
-# 添加通配符路由，用于处理前端路由
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def catch_all(path):
-    # 如果请求的是API路径，则继续404
-    if path.startswith('api/'):
-        return jsonify({'error': '路径不存在'}), 404
-    # 其他所有请求都返回dist文件夹中的index.html
-    try:
-        return send_from_directory(os.path.join(os.path.dirname(__file__), '..', 'dist'), 'index.html')
-    except Exception as e:
-        return jsonify({'error': f'无法提供静态文件: {str(e)}'}), 500
+
 
 # 创建新文件API
 @app.route('/api/create-file', methods=['POST'])
@@ -685,18 +710,27 @@ def delete_session():
         return jsonify({'error': '会话ID不能为空'}), 400
 
     try:
-        # 查找会话文件
-        session_file = os.path.join(DATA_FOLDER, f'{session_id}.json')
+        # 查找会话文件 - 修改前
+        # session_file = os.path.join(DATA_FOLDER, f'{session_id}')
+        #
+        # if not os.path.exists(session_file):
+        #     return jsonify({'error': '会话不存在'}), 404
+        #
+        # # 删除会话文件
+        # os.remove(session_file)
 
-        if not os.path.exists(session_file):
+        # 查找会话文件夹 - 修改后
+        session_folder = os.path.join(DATA_FOLDER, session_id)
+
+        if not os.path.exists(session_folder) or not os.path.isdir(session_folder):
             return jsonify({'error': '会话不存在'}), 404
 
-        # 删除会话文件
-        os.remove(session_file)
+        # 删除会话文件夹及其所有内容
+        shutil.rmtree(session_folder)
 
         return jsonify({'success': True, 'message': '会话已成功删除'})
     except PermissionError:
-        return jsonify({'error': '权限不足，无法删除会话文件'}), 403
+        return jsonify({'error': '权限不足，无法删除会话文件夹'}), 403
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

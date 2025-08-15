@@ -28,6 +28,11 @@ const goToHome = () => {
   router.push('/')
 }
 
+const previewBook = () => {
+  const previewUrl = `http://${SERVER_CONFIG['host']}/${sessionId.value}/_book`;
+  window.open(previewUrl, '_blank');
+}
+
 // 加载会话数据
 const loadSessionData = async () => {
   try {
@@ -258,9 +263,10 @@ onUnmounted(() => {
       </div>
     </div>
     <div class="session-info">
-      访问链接: <code>http://192.168.177.225:5173/{{ sessionId }}</code>
+      预览访问链接: <a :href="`http://${SERVER_CONFIG['host']}/${sessionId}/_book`" target="_blank" rel="noopener noreferrer">http://{{SERVER_CONFIG['host']}}/{{ sessionId }}/_book</a>
       <div class="button-group">
         <button class="back-btn" @click="goToHome">返回主界面</button>
+        <button class="preview-btn" @click="previewBook">预览</button>
         <button class="export-btn" @click="exportBook">发布</button>
       </div>
     </div>
@@ -364,7 +370,8 @@ h1 {
 }
 
 /* 优化按钮样式 */
-.back-btn, .export-btn {
+.back-btn, .export-btn, .preview-btn {
+
   padding: 8px 16px;
   border: none;
   border-radius: 4px;
@@ -374,12 +381,11 @@ h1 {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.back-btn {
   background-color: gray;
   color: white;
 }
+
+
 
 .back-btn:hover {
   background-color: #3367d6;
@@ -387,13 +393,14 @@ h1 {
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
 
-.export-btn {
-  background-color: gray;
-  color: white;
-}
-
 .export-btn:hover {
   background-color: #2d9249;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.preview-btn:hover {
+  background-color: #db3636;
   transform: translateY(-1px);
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
