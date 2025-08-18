@@ -15,17 +15,23 @@ from config import SERVER_CONFIG
 app = Flask(__name__)
 host = SERVER_CONFIG['host']
 PORT = SERVER_CONFIG['port']
-
-# 构建基础URL
 base_url = f'http://{host}:{PORT}'
-DATA_FOLDER = os.path.join(os.path.dirname(__file__), '..', 'data')
-PIC_FOLDER = os.path.join(DATA_FOLDER, 'pic')  # 新增：图片保存文件夹
+
+DATA_FOLDER = SERVER_CONFIG['data_path']
+USER_FOLDER = os.path.join(DATA_FOLDER, 'userdb')
+PIC_FOLDER = os.path.join(DATA_FOLDER, 'pic')
+WEBSITES_FOLDER = os.path.join(DATA_FOLDER, 'websites')
+
 
 # 确保data和pic文件夹存在
 if not os.path.exists(DATA_FOLDER):
     os.makedirs(DATA_FOLDER, exist_ok=True)
-if not os.path.exists(PIC_FOLDER):  # 新增：确保pic文件夹存在
+if not os.path.exists(PIC_FOLDER):
     os.makedirs(PIC_FOLDER, exist_ok=True)
+if not os.path.exists(USER_FOLDER):
+    os.makedirs(USER_FOLDER, exist_ok=True)
+if not os.path.exists(WEBSITES_FOLDER):
+    os.makedirs(WEBSITES_FOLDER, exist_ok=True)
 
 # 新增：上传图片文件API (用于处理编辑器内粘贴或拖入的图片)
 @app.route('/api/upload-image', methods=['POST'])
@@ -158,8 +164,8 @@ def get_all_sessions():
     try:
         sessions = []
         # 遍历data文件夹中的所有子文件夹
-        for folder in os.listdir(DATA_FOLDER):
-            folder_path = os.path.join(DATA_FOLDER, folder)
+        for folder in os.listdir(USER_FOLDER):
+            folder_path = os.path.join(USER_FOLDER, folder)
             if os.path.isdir(folder_path):
                 session_file = os.path.join(folder_path, 'session.json')
                 if os.path.exists(session_file):
@@ -187,55 +193,93 @@ def serve_public(filename):
 def serve_assets(filename):
     return send_from_directory(os.path.join(os.path.dirname(__file__), '..', 'dist', 'assets'), filename)
 
-# 创建文件夹会话API
-@app.route('/api/create-folder-session', methods=['POST'])
-def create_folder_session():
+# 新增：创建网站会话 API
+@app.route('/api/create-website-session', methods=['POST'])
+def create_website_session():
     data = request.json
-    folder_path = data.get('folderPath')
+    folder_name = data.get('folderName')
 
-    if not folder_path:
-        return jsonify({'error': '文件夹路径不能为空'}), 400
+    if not folder_name:
+        return jsonify({'error': '文件夹名称不能为空'}), 400
 
     try:
-        # 标准化路径
-        normalized_path = os.path.abspath(folder_path)
+        # 构建网站文件夹路径
+        website_folder = os.path.join(WEBSITES_FOLDER, folder_name)
+        # 定义固定模板文件夹路径
+        fixed_showlist_folder = os.path.join(DATA_FOLDER, 'fixed_ShowlistFold')
 
-        # 检查路径是否存在
-        if not os.path.exists(normalized_path):
-            return jsonify({'error': '文件夹不存在'}), 404
+        # 检查文件夹是否存在
+        if not os.path.exists(website_folder):
+            # 创建文件夹
+            os.makedirs(website_folder, exist_ok=True)
 
-        # 检查是否是文件夹
-        if not os.path.isdir(normalized_path):
-            return jsonify({'error': '提供的路径不是文件夹'}), 400
+            # 检查固定模板文件夹是否存在
+            if os.path.exists(fixed_showlist_folder):
+                # 复制 node_modules 文件夹
+                src_node_modules = os.path.join(fixed_showlist_folder, 'node_modules')
+                dest_node_modules = os.path.join(website_folder, 'node_modules')
+                if os.path.exists(src_node_modules):
+                    try:
+                        # 使用 shutil.copytree 复制文件夹
+                        shutil.copytree(src_node_modules, dest_node_modules)
+                    except Exception as e:
+                        print(f'复制 node_modules 文件夹失败: {str(e)}')
 
-        # 读取文件夹结构
-        structure = read_folder_structure(normalized_path)
+                # 复制 book.json 文件
+                src_book_json = os.path.join(fixed_showlist_folder, 'book.json')
+                dest_book_json = os.path.join(website_folder, 'book.json')
+                if os.path.exists(src_book_json):
+                    try:
+                        # 使用 shutil.copy2 复制文件
+                        shutil.copy2(src_book_json, dest_book_json)
+                    except Exception as e:
+                        print(f'复制 book.json 文件失败: {str(e)}')
+            else:
+                print(f'固定模板文件夹不存在: {fixed_showlist_folder}')
+
+            # 执行 gitbook init 命令
+            process = subprocess.run(
+                ['gitbook', 'init', website_folder],
+                capture_output=True,
+                text=True,
+                shell=True
+            )
+
+            if process.returncode != 0:
+                # 如果 gitbook init 失败，删除创建的文件夹
+                shutil.rmtree(website_folder, ignore_errors=True)
+                return jsonify({
+                    'error': f'gitbook init 失败: {process.stderr}'
+                }), 500
 
         # 检查是否已存在相同文件夹的会话
         existing_sessions = []
-        for file in os.listdir(DATA_FOLDER):
+        for file in os.listdir(USER_FOLDER):
             if file.endswith('.json'):
-                file_path = os.path.join(DATA_FOLDER, file)
+                file_path = os.path.join(USER_FOLDER, file)
                 with open(file_path, 'r', encoding='utf-8') as f:
                     session_data = json.load(f)
-                    if session_data.get('folderPath') == normalized_path:
+                    if session_data.get('folderPath') == website_folder:
                         existing_sessions.append(session_data)
 
-        # 如果存在相同文件夹的会话，返回已有的sessionId
+        # 如果存在相同文件夹的会话，返回已有的 sessionId
         if existing_sessions:
             return jsonify({'sessionId': existing_sessions[0]['sessionId']})
 
-        # 生成唯一ID
+        # 生成唯一 ID
         session_id = str(uuid.uuid4())[:8]
 
         # 创建会话文件夹
-        session_folder = os.path.join(DATA_FOLDER, session_id)
+        session_folder = os.path.join(USER_FOLDER, session_id)
         os.makedirs(session_folder, exist_ok=True)
+
+        # 读取文件夹结构
+        structure = read_folder_structure(website_folder)
 
         # 保存会话数据
         session_data = {
             'sessionId': session_id,
-            'folderPath': normalized_path,
+            'folderPath': website_folder,
             'structure': structure,
             'createdAt': datetime.now().isoformat()
         }
@@ -257,7 +301,7 @@ def get_folder_session():
 
     try:
         # 查找会话文件夹
-        session_folder = os.path.join(DATA_FOLDER, session_id)
+        session_folder = os.path.join(USER_FOLDER, session_id)
 
         if not os.path.exists(session_folder) or not os.path.isdir(session_folder):
             return jsonify({'error': '会话不存在'}), 404
@@ -318,29 +362,49 @@ def read_folder_structure(folder_path):
     structure = []
     try:
         items = os.listdir(folder_path)
+        item_list = []
+        
         for item in items:
             # 过滤掉 _book 文件夹
-            if item == '_book':
+            if item == '_book' or item == 'node_modules':
                 continue
 
             item_path = os.path.join(folder_path, item)
+            # 获取创建时间
+            created_time = os.path.getctime(item_path)
+            # 格式化为可读时间
+            formatted_time = datetime.fromtimestamp(created_time).isoformat()
+            
             if os.path.isdir(item_path):
                 # 如果是文件夹，递归读取
-                structure.append({
+                item_info = {
                     'id': time.time() + (hash(item) % 1000),
                     'name': item,
                     'type': 'folder',
                     'filePath': item_path,  # 添加filePath属性
+                    'createdAt': formatted_time,  # 记录创建时间
                     'children': read_folder_structure(item_path)
-                })
+                }
             elif os.path.isfile(item_path) and item.endswith('.md'):
                 # 只处理md文件
-                structure.append({
+                item_info = {
                     'id': time.time() + (hash(item) % 1000),
                     'name': item,
                     'type': 'file',
-                    'filePath': item_path
-                })
+                    'filePath': item_path,
+                    'createdAt': formatted_time  # 记录创建时间
+                }
+            else:
+                # 跳过不符合条件的项目
+                continue
+                
+            item_list.append((item_info, created_time))
+        
+        # 按创建时间排序
+        sorted_items = sorted(item_list, key=lambda x: x[1])
+        # 提取排序后的项目信息
+        structure = [item[0] for item in sorted_items]
+        
     except Exception as e:
         print(f"Error reading folder structure: {e}")
     return structure
@@ -402,7 +466,7 @@ def export_book():
 
     try:
         # 查找会话文件
-        SESSION_FOLDER = os.path.join(DATA_FOLDER, session_id)  # 新增：会话文件夹
+        SESSION_FOLDER = os.path.join(USER_FOLDER, session_id)  # 新增：会话文件夹
         session_file = os.path.join(SESSION_FOLDER, f'session.json')
 
         if not os.path.exists(session_file):
@@ -444,7 +508,7 @@ def export_book():
             }), 500
 
         # 构建目标文件夹路径 (data/{session_id})
-        target_session_folder = os.path.join(DATA_FOLDER, session_id)
+        target_session_folder = os.path.join(USER_FOLDER, session_id)
         os.makedirs(target_session_folder, exist_ok=True)
 
         # 构建目标_book文件夹路径
@@ -465,8 +529,6 @@ def export_book():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-
 
 # 创建新文件API
 @app.route('/api/create-file', methods=['POST'])
@@ -655,7 +717,7 @@ def edit_session():
 
     try:
         # 查找会话文件
-        session_file = os.path.join(DATA_FOLDER, f'{session_id}.json')
+        session_file = os.path.join(USER_FOLDER, f'{session_id}.json')
 
         if not os.path.exists(session_file):
             return jsonify({'error': '会话不存在'}), 404
@@ -710,17 +772,7 @@ def delete_session():
         return jsonify({'error': '会话ID不能为空'}), 400
 
     try:
-        # 查找会话文件 - 修改前
-        # session_file = os.path.join(DATA_FOLDER, f'{session_id}')
-        #
-        # if not os.path.exists(session_file):
-        #     return jsonify({'error': '会话不存在'}), 404
-        #
-        # # 删除会话文件
-        # os.remove(session_file)
-
-        # 查找会话文件夹 - 修改后
-        session_folder = os.path.join(DATA_FOLDER, session_id)
+        session_folder = os.path.join(USER_FOLDER, session_id)
 
         if not os.path.exists(session_folder) or not os.path.isdir(session_folder):
             return jsonify({'error': '会话不存在'}), 404

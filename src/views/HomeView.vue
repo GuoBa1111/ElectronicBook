@@ -2,8 +2,9 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { SERVER_CONFIG } from '../../config.js'  // 导入配置
+import { ElMessage } from 'element-plus'
 
-const folderPathInput = ref('')
+const folderNameInput = ref('')  // 改为文件夹名称输入
 const router = useRouter()
 const sessions = ref([])  // 新增：存储会话列表
 
@@ -27,7 +28,10 @@ const getAllSessions = async () => {
       throw new Error('获取会话列表失败')
     }
     const data = await response.json()
-    sessions.value = data.sessions
+    // 按创建时间升序排序
+    sessions.value = data.sessions.sort((a, b) => {
+      return new Date(a.createdAt) - new Date(b.createdAt)
+    })
   } catch (error) {
     console.error('获取会话列表错误:', error)
   }
@@ -40,19 +44,26 @@ onMounted(() => {
 
 // 读取文件夹并生成唯一ID
 const readFolder = async () => {
-  if (!folderPathInput.value.trim()) {
-    alert('请输入文件夹路径')
+  if (!folderNameInput.value.trim()) {
+    ElMessage.error('请输入文件夹名称') 
     return
   }
 
+  const loadingMessage = ElMessage({  
+    message: '文件夹创建中，请稍候...',
+    type: 'loading',
+    duration: 0,  // 不自动关闭
+    showClose: false
+  })
+
   try {
-    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/create-folder-session`, {
+    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/create-website-session`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        folderPath: folderPathInput.value
+        folderName: folderNameInput.value.trim()
       })
     })
 
@@ -61,11 +72,15 @@ const readFolder = async () => {
     }
 
     const data = await response.json()
+    loadingMessage.close()  // 关闭加载提示
+
+    ElMessage.success('文件夹创建成功，正在跳转...')  // 显示成功提示
     // 跳转到编辑器页面
     router.push({ name: 'editor', params: { id: data.sessionId } })
   } catch (error) {
     console.error('Error:', error)
-    alert('读取文件夹失败: ' + error.message)
+    loadingMessage.close()  // 关闭加载提示
+    ElMessage.error('处理文件夹失败: ' + error.message)  // 显示错误提示
   }
 }
 
@@ -175,21 +190,21 @@ const previewSession = (session) => {
       <div class="main-content">
         <div class="card">
           <h1>欢迎使用电子书籍编辑器</h1>
-          <p class="subtitle">通过读取文件夹创建新的电子书项目</p>
+          <p class="subtitle">通过输入文件夹名称创建或打开电子书项目</p>
           <div class="folder-input-section">
             <input
-              v-model="folderPathInput"
+              v-model="folderNameInput"
               type="text"
-              placeholder="输入文件夹路径"
+              placeholder="输入文件夹名称"
               class="folder-path-input"
-              id="folderPath"
-              name="folderPath"
+              id="folderName"
+              name="folderName"
             >
             <button @click="readFolder" class="read-folder-btn">
               <svg class="btn-icon" viewBox="0 0 1024 1024" width="18" height="18" fill="currentColor">
                 <path d="M909.6 370.7L840 301.1c-5.3-5.3-13.7-5.3-19 0l-256 256c-5.3 5.3-5.3 13.7 0 19l256 256c5.3 5.3 13.7 5.3 19 0l69.6-69.6c5.3-5.3 5.3-13.7 0-19L660.1 518.3c-5.3-5.3-5.3-13.7 0-19L909.6 370.7zM537.4 518.3L281.4 262.3c-5.3-5.3-13.7-5.3-19 0L192 334.1c-5.3 5.3-5.3 13.7 0 19l256 256c5.3 5.3 13.7 5.3 19 0l69.6-69.6c5.3-5.3 5.3-13.7 0-19L537.4 518.3z"></path>
               </svg>
-              读取文件夹
+              打开/创建项目
             </button>
           </div>
         </div>
@@ -207,7 +222,7 @@ const previewSession = (session) => {
   --text-color: #333;
   --text-light: #666;
   --border-color: #eee;
-  --background-color: #f8f9fa;
+  --background-color: #f5f5f5;
   --card-bg: #fff;
   --hover-color: #f5f5f5;
   --sidebar-width: 450px;
@@ -467,4 +482,5 @@ h1 {
     padding: 20px;
   }
 }
+
 </style>
