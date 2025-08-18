@@ -53,7 +53,11 @@ const readFolder = async () => {
     message: '文件夹创建中，请稍候...',
     type: 'loading',
     duration: 0,  // 不自动关闭
-    showClose: false
+    showClose: false,
+    style: {
+      backgroundColor: '#4a90e2',
+      color: 'white'
+    },
   })
 
   try {
@@ -222,11 +226,13 @@ const previewSession = (session) => {
   --text-color: #333;
   --text-light: #666;
   --border-color: #eee;
-  --background-color: #f5f5f5;
+  --background-color: #f8f9fa;
   --card-bg: #fff;
   --hover-color: #f5f5f5;
   --sidebar-width: 450px;
+  --loading-bg: #4a90e2;  
 }
+
 
 .home-container {
   display: flex;
@@ -482,5 +488,4 @@ h1 {
     padding: 20px;
   }
 }
-
 </style>
