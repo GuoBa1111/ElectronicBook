@@ -24,7 +24,9 @@ const emit = defineEmits(['file-select'])
 // 监听初始数据变化
 watch(() => props.initialFiles, (newVal) => {
   if (newVal && newVal.length) {
-    files.value = newVal
+    // 添加排序逻辑，确保按创建时间升序排列
+    const sortedFiles = sortFilesByCreationTime(newVal);
+    files.value = sortedFiles
     // 如果有folderPath，优先使用folderPath设置currentFolder
     if (props.folderPath) {
       currentFolder.value = props.folderPath.split('\\').pop()
@@ -285,6 +287,29 @@ const uploadFile = () => {
   fileInput.value.click()
 }
 
+// 新添加：递归按创建时间排序文件的函数
+const sortFilesByCreationTime = (filesArray) => {
+  if (!Array.isArray(filesArray)) return [];
+  
+  // 直接按创建时间升序排列，不考虑类型
+  const sorted = [...filesArray].sort((a, b) => {
+    const timeA = new Date(a.createdAt).getTime();
+    const timeB = new Date(b.createdAt).getTime();
+    return timeA - timeB;
+  });
+  
+  // 递归对每个文件夹的子项目进行排序
+  return sorted.map(item => {
+    if (item.type === 'folder' && item.children && item.children.length) {
+      return {
+        ...item,
+        children: sortFilesByCreationTime(item.children)
+      };
+    }
+    return item;
+  });
+};
+
 // 处理文件上传
 const handleFileUpload = async (event) => {
   const file = event.target.files[0]
@@ -372,9 +397,12 @@ const refreshFileTree = async () => {
     }
 
     const newFiles = await response.json();
+    
+    // 添加排序逻辑，确保按创建时间升序排列
+    const sortedFiles = sortFilesByCreationTime(newFiles);
 
     // 更新文件树
-    files.value = newFiles;
+    files.value = sortedFiles;
 
     // 恢复展开/折叠状态
     const restoreExpandedState = (filesArray) => {
@@ -536,3 +564,4 @@ const handleBlankClick = (event) => {
 </template>
 
 <style scoped src="./FileExplorer.css"></style>
+
