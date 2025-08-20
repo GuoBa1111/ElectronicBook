@@ -1,5 +1,4 @@
 <script setup>
-import { SERVER_CONFIG } from '../../config.js'  // 导入配置
 import { ref, inject, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'  // 修改：添加useRouter导入
 import FileExplorer from '../components/FileExplorer.vue'
@@ -29,7 +28,7 @@ const goToHome = () => {
 }
 
 const previewBook = () => {
-  const previewUrl = `http://${SERVER_CONFIG['host']}/${sessionId.value}/_book`;
+  const previewUrl = `/web/${sessionId.value}/_book`;
   window.open(previewUrl, '_blank');
 }
 
@@ -116,10 +115,10 @@ const saveFileToBackend = async () => {
 //发布电子书
 const exportBook = async () => {
   try {
-    ElMessage({
+    const loadingMessage = ElMessage({
       message: '正在发布...',
       type: 'info',
-      duration: 2000
+      showClose: false
     });
 
     const response = await fetch(`/api/export-book`, {
@@ -132,25 +131,31 @@ const exportBook = async () => {
       })
     });
 
+
     if (!response.ok) {
+      loadingMessage.close();
       throw new Error('发布失败')
     }
 
     const data = await response.json();
-
     if (data.success) {
       ElMessage({
         message: '发布成功!',
         type: 'success',
         duration: 3000
       });
+      loadingMessage.close();
     } else {
       ElMessage({
         message: '发布失败: ' + data.error,
         type: 'error'
       });
+      loadingMessage.close();
     }
   } catch (error) {
+    if (loadingMessage) {
+      loadingMessage.close();
+    }
     console.error('发布错误:', error);
     ElMessage({
       message: '发布失败: ' + error.message,
@@ -293,12 +298,11 @@ onUnmounted(() => {
       </div>
     </div>
     <div class="session-info">
-      预览访问链接: <a :href="`http://${SERVER_CONFIG['host']}/${sessionId}/_book`" target="_blank" rel="noopener noreferrer">http://{{SERVER_CONFIG['host']}}/{{ sessionId }}/_book</a>
       <div class="button-group">
+        <button class="export-summary-btn" @click="handleExportSummary">①导出目录</button>
+        <button class="export-btn" @click="exportBook">②保存并发布</button>
+        <button class="preview-btn" @click="previewBook">③预览</button>
         <button class="back-btn" @click="goToHome">返回主界面</button>
-        <button class="export-summary-btn" @click="handleExportSummary">导出目录</button>
-        <button class="preview-btn" @click="previewBook">预览</button>
-        <button class="export-btn" @click="exportBook">发布</button>
       </div>
     </div>
     <div class="main-layout">
@@ -398,6 +402,7 @@ h1 {
 .button-group {
   display: flex;
   gap: 12px;
+  margin-left: auto;
 }
 
 /* 优化按钮样式 */

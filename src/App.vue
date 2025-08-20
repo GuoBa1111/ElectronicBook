@@ -1,8 +1,5 @@
 <script setup>
-
-import { SERVER_CONFIG } from '../config.js';  // 导入配置
 import { ref, inject, onMounted, onUnmounted, watch } from 'vue'
-import FileExplorer from './components/FileExplorer.vue'
 
 const editorRef = ref(null)
 const Vditor = inject('Vditor')

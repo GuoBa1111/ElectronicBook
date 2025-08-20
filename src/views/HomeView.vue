@@ -1,24 +1,11 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { SERVER_CONFIG } from '../../config.js'  // 导入配置
 import { ElMessage } from 'element-plus'
 
 const folderNameInput = ref('')  // 改为文件夹名称输入
 const router = useRouter()
 const sessions = ref([])  // 新增：存储会话列表
-
-// 新增：获取路径中的最后一个文件夹名
-const getLastFolderName = (path) => {
-  // 处理Windows路径分隔符
-  const parts = path.split('\\');
-  // 如果最后一个部分是空（路径以\结尾），则取倒数第二个
-  if (parts[parts.length - 1] === '') {
-    return parts[parts.length - 2];
-  }
-  return parts[parts.length - 1];
-}
-
 
 // 新增：获取所有会话
 const getAllSessions = async () => {
@@ -95,7 +82,7 @@ const goToSession = (sessionId) => {
 
 // 新增：编辑会话名称
 const editSession = async (session) => {
-  const currentName = getLastFolderName(session.folderPath)
+  const currentName = session.folderName
   const newName = prompt('请输入新的文件夹名称:', currentName)
   if (newName !== null && newName.trim() !== '') {
     try {
@@ -148,7 +135,7 @@ const deleteSession = async (session) => {
 
 // 新增：预览会话
 const previewSession = (session) => {
-  const previewUrl = `http://${SERVER_CONFIG['host']}/${session.sessionId}/_book`;
+  const previewUrl = `/web/${session.sessionId}/_book`;
   window.open(previewUrl, '_blank');
 }
 
@@ -177,7 +164,7 @@ const previewSession = (session) => {
             <svg class="folder-icon" viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor">
               <path d="M928 224H832v-64c0-17.7-14.3-32-32-32H192c-17.7 0-32 14.3-32 32v576c0 17.7 14.3 32 32 32h192v64c0 17.7 14.3 32 32 32h384c17.7 0 32-14.3 32-32v-64h96c17.7 0 32-14.3 32-32V256c0-17.7-14.3-32-32-32zM896 800h-64v-64c0-17.7-14.3-32-32-32H320c-17.7 0-32 14.3-32 32v64H160V160h576v64h160v576z"></path>
             </svg>
-            <div class="session-path">{{ getLastFolderName(session.folderName) }}</div>
+            <div class="session-path">{{ session.folderName}}</div>
             <div class="session-actions">
               <button @click.stop="previewSession(session)" class="preview-btn">👁️</button>
               <button @click.stop="editSession(session)" class="edit-btn">✏️</button>
@@ -282,15 +269,13 @@ const previewSession = (session) => {
   display: flex;
   flex-direction: column;
   transition: all 0.3s;
-  overflow-y: auto;
 }
 
 .sidebar-header {
   padding: 20px;
-  position: sticky;
-  top: 0;
   background-color: var(--card-bg);
-  z-index: 5;
+  z-index: 100;
+  border-bottom: 1px solid var(--border-color); /* 添加底边框增强分隔 */
 }
 
 .sidebar-header h2 {
@@ -307,9 +292,11 @@ const previewSession = (session) => {
 
 .session-list {
   list-style: none;
-  padding: 0 20px 20px;
+  padding: 6px 20px 20px;
   margin: 0;
   flex: 1;
+  overflow-y: auto; /* 只让列表内容滚动 */
+  min-height: 0; /* 确保flex子元素正确计算高度 */
 }
 
 .session-item {

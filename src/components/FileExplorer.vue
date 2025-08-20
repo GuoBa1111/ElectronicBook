@@ -2,7 +2,6 @@
 import { ref, onMounted, defineComponent, watch, onUnmounted  } from 'vue'
 // 导入ElMessage
 import { ElMessage, ElTooltip } from 'element-plus'
-import { SERVER_CONFIG } from '../../config.js'  // 导入配置
 
 const props = defineProps({
   initialFiles: { type: Array, default: () => [] },
@@ -485,6 +484,19 @@ const deleteSelectedItem = async () => {
     return;
   }
 
+  // 新增：检查是否为README.md或SUMMARY.md文件，如果是则不允许删除
+  if (selectedFile.value.type === 'file' && 
+      selectedFile.value.name.toLowerCase() === 'readme.md' ) {
+    ElMessage.warning('README.md是电子书的核心文件，不允许删除');
+    return;
+  }
+
+  if (selectedFile.value.type === 'file' && 
+       selectedFile.value.name.toLowerCase() === 'summary.md') {
+    ElMessage.warning('SUMMARY.md是电子书的核心文件，不允许删除');
+    return;
+  }
+
   const isConfirmed = confirm(`确定要删除 ${selectedFile.value.name} ${selectedFile.value.type === 'folder' ? '文件夹' : '文件'} 吗？`);
   if (!isConfirmed) return;
 
@@ -520,6 +532,19 @@ const deleteSelectedItem = async () => {
 const renameSelectedItem = async () => {
   if (!selectedFile.value) {
     alert('请先选择要重命名的文件或文件夹');
+    return;
+  }
+
+  // 新增：检查是否为README.md或SUMMARY.md文件，如果是则不允许删除
+  if (selectedFile.value.type === 'file' && 
+      selectedFile.value.name.toLowerCase() === 'readme.md' ) {
+    ElMessage.warning('README.md是电子书的核心文件，不允许修改名称');
+    return;
+  }
+
+  if (selectedFile.value.type === 'file' && 
+       selectedFile.value.name.toLowerCase() === 'summary.md') {
+    ElMessage.warning('SUMMARY.md是电子书的核心文件，不允许修改名称');
     return;
   }
 
