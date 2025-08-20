@@ -36,7 +36,7 @@ const previewBook = () => {
 // 加载会话数据
 const loadSessionData = async () => {
   try {
-    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/get-folder-session?id=${sessionId.value}`)
+    const response = await fetch(`/api/get-folder-session?id=${sessionId.value}`)
     if (!response.ok) {
       if (response.status === 404) {
         throw new Error(`会话ID '${sessionId.value}' 不存在`)
@@ -79,7 +79,7 @@ const saveFileToBackend = async () => {
   }
 
   try {
-    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/save-file`, {
+    const response = await fetch(`/api/save-file`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -122,7 +122,7 @@ const exportBook = async () => {
       duration: 2000
     });
 
-    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/export-book`, {
+    const response = await fetch(`/api/export-book`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -158,6 +158,36 @@ const exportBook = async () => {
     });
   }
 }
+
+const handleExportSummary = async () => {
+  try {
+    const response = await fetch(`/api/export-summary`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        sessionId: route.params.id
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error('导出目录请求失败');
+    }
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      ElMessage.success('目录已成功导出到 SUMMARY.md');
+    } else {
+      ElMessage.error(data.error || '导出目录失败');
+    }
+  } catch (error) {
+    console.error('导出目录失败:', error);
+    ElMessage.error('导出目录失败，请重试');
+  }
+};
+
 onMounted(async () => {
   await loadSessionData()
 
@@ -172,7 +202,7 @@ onMounted(async () => {
       delay: 0
     },
     upload: {
-      url: `${SERVER_CONFIG.baseUrl}/api/upload-image`,
+      url: `/api/upload-image`,
       fieldName: 'file[]',
       maxSize: 1024 * 1024 * 10, // 10MB
       accept: 'image/*',
@@ -193,7 +223,7 @@ onMounted(async () => {
               editorRef.value.insertValue('<', true);
               editorRef.value.insertValue('img src=', true);
               editorRef.value.insertValue(imageUrl, true);
-              editorRef.value.insertValue(' width=500 height=300>', true);
+              editorRef.value.insertValue(' width=400 height=400>', true);
               ElMessage({ message: '图片上传成功', type: 'success' });
             } else if (res.data.errFiles && res.data.errFiles.length > 0) {
               ElMessage({ message: `图片上传失败: ${res.data.errFiles.join(', ')}`, type: 'error' });
@@ -266,6 +296,7 @@ onUnmounted(() => {
       预览访问链接: <a :href="`http://${SERVER_CONFIG['host']}/${sessionId}/_book`" target="_blank" rel="noopener noreferrer">http://{{SERVER_CONFIG['host']}}/{{ sessionId }}/_book</a>
       <div class="button-group">
         <button class="back-btn" @click="goToHome">返回主界面</button>
+        <button class="export-summary-btn" @click="handleExportSummary">导出目录</button>
         <button class="preview-btn" @click="previewBook">预览</button>
         <button class="export-btn" @click="exportBook">发布</button>
       </div>
@@ -370,7 +401,7 @@ h1 {
 }
 
 /* 优化按钮样式 */
-.back-btn, .export-btn, .preview-btn {
+.back-btn, .export-btn, .preview-btn, .export-summary-btn {
 
   padding: 8px 16px;
   border: none;
@@ -404,6 +435,11 @@ h1 {
   transform: translateY(-1px);
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
+
+.export-summary-btn:hover {
+  background-color: #c9c757;
+}
+
 
 .main-layout {
   display: flex;

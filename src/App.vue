@@ -26,7 +26,7 @@ const saveFileToBackend = async () => {
   }
 
   try {
-    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/save-file`, {
+    const response = await fetch(`/api/save-file`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

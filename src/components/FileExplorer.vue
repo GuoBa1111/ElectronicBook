@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, defineComponent, watch } from 'vue'
+import { ref, onMounted, defineComponent, watch, onUnmounted  } from 'vue'
 // 导入ElMessage
 import { ElMessage, ElTooltip } from 'element-plus'
 import { SERVER_CONFIG } from '../../config.js'  // 导入配置
@@ -94,7 +94,7 @@ const selectFile = async (file) => {
     try {
       // 调用后端API获取文件内容
       const response = await fetch(
-        `${SERVER_CONFIG.baseUrl}/api/file-content?filePath=${encodeURIComponent(file.filePath)}`
+        `/api/file-content?filePath=${encodeURIComponent(file.filePath)}`
       )
 
       if (!response.ok) {
@@ -166,6 +166,30 @@ onMounted(() => {
   }
   // 删除默认加载文件夹的代码
 });
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeyDown);
+});
+
+// 添加键盘事件处理函数
+const handleKeyDown = (event) => {
+  // 只有当文件浏览器有焦点且有选中的文件时才处理键盘事件
+  // 排除输入框等场景，避免在用户输入时触发
+  if (selectedFile.value && 
+      !['INPUT', 'TEXTAREA'].includes(event.target.tagName) &&
+      !event.target.isContentEditable) {
+    
+    if (event.key === 'Delete') {
+      event.preventDefault();
+      deleteSelectedItem();
+    } else if (event.key === 'F2') {
+      event.preventDefault();
+      renameSelectedItem();
+    }
+  }
+};
+
+
 // 添加文件操作相关函数
 const fileInput = ref(null)
 
@@ -180,6 +204,9 @@ const selectedStyle = {
   transition: 'all 0.2s ease',
   outline: 'none'
 }
+
+// 添加键盘事件监听
+  document.addEventListener('keydown', handleKeyDown);
 
 // 辅助函数：确定当前操作路径
 const getCurrentOperationPath = () => {
@@ -207,7 +234,7 @@ const getCurrentOperationPath = () => {
 
 // 创建新文件
 const createNewFile = async () => {
-  const fileName = prompt('请输入新文件名 (需以.md结尾)', '新文件.md')
+  const fileName = prompt('请输入新文件名', '新文件')
   if (!fileName) return
 
   // 确保文件以.md结尾
@@ -221,7 +248,7 @@ const createNewFile = async () => {
   }
 
   try {
-    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/create-file`, {
+    const response = await fetch(`/api/create-file`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -257,7 +284,7 @@ const createNewFolder = async () => {
   const currentPath = getCurrentOperationPath()
 
   try {
-    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/create-folder`, {
+    const response = await fetch(`/api/create-folder`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -333,7 +360,7 @@ const handleFileUpload = async (event) => {
     formData.append('file', file)
     formData.append('folderPath', currentPath)
 
-    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/upload-file`, {
+    const response = await fetch(`/api/upload-file`, {
       method: 'POST',
       body: formData
     })
@@ -382,7 +409,7 @@ const refreshFileTree = async () => {
       return;
     }
 
-    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/read-folder`, {
+    const response = await fetch(`/api/read-folder`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -450,13 +477,8 @@ const refreshFileTree = async () => {
   }
 };
 
-// 添加折叠所有文件夹的函数
-const collapseAllFolders = () => {
-  // 清空expandedFolders对象，所有文件夹都将折叠
-  expandedFolders.value = {};
-};
-
 // 添加删除文件/文件夹的函数
+// 在删除函数后面添加重命名函数
 const deleteSelectedItem = async () => {
   if (!selectedFile.value) {
     alert('请先选择要删除的文件或文件夹');
@@ -467,7 +489,7 @@ const deleteSelectedItem = async () => {
   if (!isConfirmed) return;
 
   try {
-    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/delete-item`, {
+    const response = await fetch(`/api/delete-item`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -494,6 +516,71 @@ const deleteSelectedItem = async () => {
     alert('删除失败: ' + error.message);
   }
 };
+// 修改重命名函数，自动处理md文件扩展名
+const renameSelectedItem = async () => {
+  if (!selectedFile.value) {
+    alert('请先选择要重命名的文件或文件夹');
+    return;
+  }
+
+  const currentName = selectedFile.value.name;
+  let displayName = currentName;
+  let isMdFile = false;
+  
+  // 如果是文件且以.md结尾，显示不带扩展名的文件名
+  if (selectedFile.value.type === 'file' && currentName.endsWith('.md')) {
+    displayName = currentName.substring(0, currentName.lastIndexOf('.'));
+    isMdFile = true;
+  }
+
+  const newName = prompt('请输入新名称:', displayName);
+  
+  // 用户取消或未修改名称
+  if (newName === null || newName === displayName) {
+    return;
+  }
+  
+  // 验证新名称不为空
+  if (!newName.trim()) {
+    alert('名称不能为空');
+    return;
+  }
+
+  // 如果是md文件，确保新名称带有.md扩展名
+  let finalName = newName;
+  if (isMdFile && !newName.endsWith('.md')) {
+    finalName = newName + '.md';
+  }
+
+  try {
+    const response = await fetch(`/api/rename-item`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        filePath: selectedFile.value.filePath,
+        newName: finalName,  // 使用处理后的最终名称
+        isFolder: selectedFile.value.type === 'folder'
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error('重命名失败');
+    }
+
+    await response.json();
+    ElMessage.success('重命名成功');
+    // 刷新文件树
+    refreshFileTree();
+    // 清除选中状态
+    selectedFile.value = null;
+  } catch (error) {
+    console.error('重命名错误:', error);
+    alert('重命名失败: ' + error.message);
+  }
+};
+
 // 添加处理空白区域点击的函数
 const handleBlankClick = (event) => {
   // 检查点击目标是否是file-list元素本身
@@ -531,14 +618,15 @@ const handleBlankClick = (event) => {
                 <span class="icon">🗑️</span> 
               </button>
             </ElTooltip>
-            <ElTooltip content="折叠" placement="top" :show-after="500">
-              <button class="toolbar-btn" @click="collapseAllFolders">
-                <span class="icon">📚</span> 
+            <!-- 将折叠按钮修改为重命名按钮 -->
+            <ElTooltip content="重命名" placement="top" :show-after="500">
+              <button class="toolbar-btn" @click="renameSelectedItem">
+                <span class="icon">✏️</span> 
               </button>
             </ElTooltip>
           </div>
         </div>
-        <div class="current-folder">当前: {{ currentFolder }}</div>
+        <div class="current-folder">当前: {{ currentFolder.split('/').pop() }}</div>
       </div>
     </div>
     <div v-else class="file-explorer-header-readonly">

@@ -23,7 +23,7 @@ const getLastFolderName = (path) => {
 // 新增：获取所有会话
 const getAllSessions = async () => {
   try {
-    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/get-all-sessions`)
+    const response = await fetch(`/api/get-all-sessions`)
     if (!response.ok) {
       throw new Error('获取会话列表失败')
     }
@@ -61,7 +61,7 @@ const readFolder = async () => {
   })
 
   try {
-    const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/create-website-session`, {
+    const response = await fetch(`/api/create-website-session`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -99,7 +99,7 @@ const editSession = async (session) => {
   const newName = prompt('请输入新的文件夹名称:', currentName)
   if (newName !== null && newName.trim() !== '') {
     try {
-      const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/edit-session`, {
+      const response = await fetch(`/api/edit-session`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -125,7 +125,7 @@ const editSession = async (session) => {
 const deleteSession = async (session) => {
   if (confirm('确定要删除这个文件夹会话吗?')) {
     try {
-      const response = await fetch(`${SERVER_CONFIG.baseUrl}/api/delete-session`, {
+      const response = await fetch(`/api/delete-session`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -177,7 +177,7 @@ const previewSession = (session) => {
             <svg class="folder-icon" viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor">
               <path d="M928 224H832v-64c0-17.7-14.3-32-32-32H192c-17.7 0-32 14.3-32 32v576c0 17.7 14.3 32 32 32h192v64c0 17.7 14.3 32 32 32h384c17.7 0 32-14.3 32-32v-64h96c17.7 0 32-14.3 32-32V256c0-17.7-14.3-32-32-32zM896 800h-64v-64c0-17.7-14.3-32-32-32H320c-17.7 0-32 14.3-32 32v64H160V160h576v64h160v576z"></path>
             </svg>
-            <div class="session-path">{{ getLastFolderName(session.folderPath) }}</div>
+            <div class="session-path">{{ getLastFolderName(session.folderName) }}</div>
             <div class="session-actions">
               <button @click.stop="previewSession(session)" class="preview-btn">👁️</button>
               <button @click.stop="editSession(session)" class="edit-btn">✏️</button>
