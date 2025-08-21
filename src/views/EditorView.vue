@@ -191,7 +191,73 @@ const handleExportSummary = async () => {
     console.error('导出目录失败:', error);
     ElMessage.error('导出目录失败，请重试');
   }
-};
+}
+//导出pdf
+const exportPDF = async () => {
+  try {
+    const loadingMessage = ElMessage({
+      message: '正在生成PDF...',
+      type: 'info',
+      showClose: false
+    });
+
+    const response = await fetch(`/api/export-pdf`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        sessionId: sessionId.value
+      })
+    });
+
+    loadingMessage.close();
+
+    if (response.ok) {
+      // 直接触发下载
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      
+      // 从响应头获取文件名，如果没有则使用默认名
+      const contentDisposition = response.headers.get('content-disposition');
+
+      let fileName = '电子书.pdf';
+      if (contentDisposition) {
+        const matches = /filename=([^;]+)/i.exec(contentDisposition);
+
+        if (matches && matches[1]) {
+          // 获取捕获组1的内容，并去除可能存在的双引号
+          fileName = matches[1].replace(/^"|"$/g, '');
+        }
+      }
+      
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      
+      // 清理
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      ElMessage({
+        message: 'PDF导出成功!',
+        type: 'success',
+        duration: 3000
+      });
+    } else {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'PDF导出失败');
+    }
+  } catch (error) {
+    console.error('导出PDF错误:', error);
+    ElMessage({
+      message: 'PDF导出失败: ' + error.message,
+      type: 'error'
+    });
+  }
+}
 
 onMounted(async () => {
   await loadSessionData()
@@ -302,6 +368,7 @@ onUnmounted(() => {
         <button class="export-summary-btn" @click="handleExportSummary">①导出目录</button>
         <button class="export-btn" @click="exportBook">②保存并发布</button>
         <button class="preview-btn" @click="previewBook">③预览</button>
+        <button class="pdf-btn" @click="exportPDF">导出PDF</button>
         <button class="back-btn" @click="goToHome">返回主界面</button>
       </div>
     </div>
@@ -406,7 +473,7 @@ h1 {
 }
 
 /* 优化按钮样式 */
-.back-btn, .export-btn, .preview-btn, .export-summary-btn {
+.back-btn, .export-btn, .preview-btn, .export-summary-btn, .pdf-btn {
 
   padding: 8px 16px;
   border: none;
@@ -443,6 +510,14 @@ h1 {
 
 .export-summary-btn:hover {
   background-color: #c9c757;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.pdf-btn:hover {
+  background-color: #df633d;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
 
 

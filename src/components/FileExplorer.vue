@@ -28,7 +28,7 @@ watch(() => props.initialFiles, (newVal) => {
     files.value = sortedFiles
     // 如果有folderPath，优先使用folderPath设置currentFolder
     if (props.folderPath) {
-      currentFolder.value = props.folderPath.split('\\').pop()
+      currentFolder.value = props.folderPath.split('/').pop()
     } else {
       currentFolder.value = '已加载文件夹'
     }
@@ -40,7 +40,7 @@ watch(() => props.initialFiles, (newVal) => {
 // 监听folderPath变化
 watch(() => props.folderPath, (newVal) => {
   if (newVal) {
-    currentFolder.value = newVal.split('\\').pop()
+    currentFolder.value = newVal.split('/').pop()
   }
 }, {
   immediate: true
@@ -224,9 +224,9 @@ const getCurrentOperationPath = () => {
 
   // 如果选中的是文件，则返回其所在目录
   if (selectedFile.value.type === 'file' && selectedFile.value.filePath) {
-    const pathParts = selectedFile.value.filePath.split('\\')
+    const pathParts = selectedFile.value.filePath.split('/')
     pathParts.pop() // 移除文件名
-    return pathParts.join('\\')
+    return pathParts.join('/')
   }
   return props.folderPath || null
 }
