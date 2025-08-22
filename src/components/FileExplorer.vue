@@ -16,6 +16,9 @@ const selectedFile = ref(null)
 const currentFolder = ref('未选择文件夹')
 const folderPathInput = ref('')
 const expandedFolders = ref({})
+const draggedItem = ref(null)
+const dragOverItem = ref(null)
+const dragOverIndex = ref(-1)
 
 // emits: ['file-select']
 const emit = defineEmits(['file-select'])
@@ -46,7 +49,124 @@ watch(() => props.folderPath, (newVal) => {
   immediate: true
 })
 
+const handleDragStart = (event, file) => {
+  // 检查是否为README.md文件，如果是则不允许拖动
+  if (file.name.toLowerCase() === 'readme.md') {
+    event.preventDefault()
+    ElMessage.warning('README.md是电子书的核心文件，不允许拖动')
+    return
+  }
+  
+  draggedItem.value = file
+  // 设置拖动时的透明度
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', file.id)
+}
 
+// 拖动经过
+const handleDragOver = (event, file, index) => {
+  event.preventDefault()
+  // 不允许拖放到README.md上
+  if (file.name.toLowerCase() === 'readme.md') {
+    event.dataTransfer.dropEffect = 'none'
+    return
+  }
+  
+  event.dataTransfer.dropEffect = 'move'
+  dragOverItem.value = file
+  dragOverIndex.value = index
+}
+
+// 拖动离开
+const handleDragLeave = () => {
+  dragOverItem.value = null
+  dragOverIndex.value = -1
+}
+
+// 放置
+const handleDrop = async (event, targetFile, targetIndex) => {
+  event.preventDefault()
+  
+  // 如果拖动的是README.md或者目标是README.md，不处理
+  if (!draggedItem.value || targetFile.name.toLowerCase() === 'readme.md') {
+    resetDragState()
+    return
+  }
+  
+  // 获取父文件夹
+  let parentFolder = null
+  const findParentFolder = (filesArray) => {
+    for (let i = 0; i < filesArray.length; i++) {
+      const item = filesArray[i]
+      if (item.type === 'folder' && item.children) {
+        // 检查当前文件夹是否包含拖动的项目
+        const containsDragged = item.children.some(child => child.id === draggedItem.value.id)
+        if (containsDragged) {
+          parentFolder = item
+          return true
+        }
+        // 递归检查子文件夹
+        if (findParentFolder(item.children)) {
+          return true
+        }
+      }
+    }
+    return false
+  }
+  
+  // 首先在当前文件树中查找父文件夹
+  if (!findParentFolder(files.value)) {
+    // 如果没找到，检查当前文件夹是否直接包含拖动的项目
+    const isInRoot = files.value.some(item => item.id === draggedItem.value.id)
+    if (isInRoot) {
+      // 根目录
+      parentFolder = { filePath: props.folderPath || getCurrentOperationPath() }
+    }
+  }
+  
+  if (!parentFolder) {
+    ElMessage.error('无法确定父文件夹')
+    resetDragState()
+    return
+  }
+  
+  try {
+    // 调用后端API更新排序
+    const response = await fetch(`/api/reorder-items`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        parentFolderPath: parentFolder.filePath,
+        draggedId: draggedItem.value.id,
+        targetId: targetFile.id,
+        targetIndex: targetIndex
+      })
+    })
+    
+    if (!response.ok) {
+      throw new Error('排序失败')
+    }
+    
+    await response.json()
+    ElMessage.success('排序成功')
+    // 刷新文件树
+    refreshFileTree()
+  } catch (error) {
+    console.error('排序错误:', error)
+    ElMessage.error('排序失败: ' + error.message)
+  } finally {
+    resetDragState()
+  }
+}
+
+// 重置拖动状态
+const resetDragState = () => {
+  draggedItem.value = null
+  dragOverItem.value = null
+  dragOverIndex.value = -1
+}
 
 // 切换文件夹展开状态
 const toggleFolder = (folderId) => {
@@ -121,21 +241,46 @@ const FileTree = defineComponent({
     files: Array,
     expandedFolders: Object,
     selectedFile: Object,
-    selectedStyle: Object  // 添加这个prop
+    selectedStyle: Object,
+    dragOverItem: Object,
+    dragOverIndex: Number
   },
-  emits: ['file-click'],
+  emits: ['file-click', 'drag-start', 'drag-over', 'drag-leave', 'drop'],
   setup(props, { emit }) {
     return {
       handleClick: (file) => {
         emit('file-click', file)
+      },
+      handleDragStart: (event, file) => {
+        emit('drag-start', event, file)
+      },
+      handleDragOver: (event, file, index) => {
+        emit('drag-over', event, file, index)
+      },
+      handleDragLeave: (event) => {
+        emit('drag-leave', event)
+      },
+      handleDrop: (event, file, index) => {
+        emit('drop', event, file, index)
       }
     }
   },
   template: `
     <div>
-      <div v-for="file in files" :key="file.id" class="file-item">
-        <div @click="handleClick(file)" :class="{ 'selected': selectedFile?.id === file.id }"
-             :style="selectedFile?.id === file.id ? selectedStyle : {}">
+      <div v-for="(file, index) in files" :key="file.id" class="file-item">
+        <div 
+          @click="handleClick(file)" 
+          :class="{
+            'selected': selectedFile?.id === file.id,
+            'drag-over': dragOverItem?.id === file.id
+          }"
+          :style="selectedFile?.id === file.id ? selectedStyle : {}"
+          :draggable="file.name.toLowerCase() !== 'readme.md'"
+          @dragstart="handleDragStart($event, file)"
+          @dragover="handleDragOver($event, file, index)"
+          @dragleave="handleDragLeave"
+          @drop="handleDrop($event, file, index)"
+        >
           <span v-if="file.type === 'folder'">
             {{ expandedFolders[file.id] ? '📂' : '📁' }}
           </span>
@@ -148,8 +293,14 @@ const FileTree = defineComponent({
           :files="file.children || []"
           :expandedFolders="expandedFolders"
           :selectedFile="selectedFile"
-          :selectedStyle="selectedStyle" 
+          :selectedStyle="selectedStyle"
+          :dragOverItem="dragOverItem"
+          :dragOverIndex="dragOverIndex"
           @file-click="handleClick"
+          @drag-start="handleDragStart"
+          @drag-over="handleDragOver"
+          @drag-leave="handleDragLeave"
+          @drop="handleDrop"
           class="sub-folder"
         />
       </div>
@@ -661,7 +812,19 @@ const handleBlankClick = (event) => {
     </div>
     <div class="file-list" @click="handleBlankClick">
       <!-- 使用递归组件渲染文件树 -->
-      <FileTree :files="files" :expandedFolders="expandedFolders" :selectedFile="selectedFile" :selectedStyle="selectedStyle" @file-click="handleFileClick" />
+      <FileTree 
+        :files="files" 
+        :expandedFolders="expandedFolders" 
+        :selectedFile="selectedFile" 
+        :selectedStyle="selectedStyle" 
+        :dragOverItem="dragOverItem"
+        :dragOverIndex="dragOverIndex"
+        @file-click="handleFileClick" 
+        @drag-start="handleDragStart"
+        @drag-over="handleDragOver"
+        @drag-leave="handleDragLeave"
+        @drop="handleDrop"
+      />
       <!-- 空状态提示 -->
       <div v-if="files.length === 0" class="empty-state">
         <div class="empty-icon">📁</div>

@@ -280,3 +280,37 @@ h3 {
 .hidden-file-input {
   display: none;
 }
+
+.file-item > div[draggable="true"] {
+  cursor: grab;
+}
+
+.file-item > div[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.file-item > div.drag-over {
+  background-color: rgba(66, 133, 244, 0.1);
+  border: 2px dashed var(--primary-color);
+}
+
+.file-item > div.drag-over::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 20px;
+  background-color: var(--primary-color);
+}
+
+/* 拖动时的文件项样式 */
+.file-item > div[draggable="true"]:not(.selected):hover {
+  background-color: var(--hover-background);
+}
+
+/* 拖动过程中的半透明效果 */
+.file-item > div.dragging {
+  opacity: 0.5;
+}

@@ -63,21 +63,128 @@ conn.commit()
 # 创建file_mapping表（如果不存在）
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS file_mapping (
-        real_name TEXT PRIMARY KEY,
+        id TEXT PRIMARY KEY,
+        real_name TEXT NOT NULL,
         display_name TEXT NOT NULL,
         file_path TEXT NOT NULL,
+        parent_path TEXT NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0,
+        child_count INTEGER NOT NULL DEFAULT 0,
+        item_type TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
 ''')
 conn.commit()
 
+# 添加在文件开头的导入部分之后
+
+def import_folder_structure(folder_path):
+    """
+    批量导入文件夹结构到file_mapping表
+    :param folder_path: 要导入的文件夹路径
+    """
+    try:
+        # 标准化路径
+        normalized_folder_path = os.path.abspath(folder_path)
+        
+        # 首先删除该文件夹在数据库中的所有映射
+        cursor.execute("DELETE FROM file_mapping WHERE file_path LIKE ?", (normalized_folder_path + '%',))
+        conn.commit()
+        
+        # 递归导入文件夹结构，但不导入根文件夹本身
+        # 将根文件夹路径作为父路径传递，确保一级文件（夹）的父路径不为空
+        _import_folder_recursive(normalized_folder_path, normalized_folder_path)
+        
+        return True, "文件夹结构导入成功"
+    except Exception as e:
+        print(f"导入文件夹结构时出错: {e}")
+        return False, str(e)
+
+def _import_folder_recursive(folder_path, parent_path):
+    """
+    递归导入文件夹内容
+    """
+    try:
+        items = os.listdir(folder_path)
+        md_files = []
+        folders = []
+        
+        # 分离文件和文件夹
+        for item in items:
+            if item == '_book' or item == 'node_modules':
+                continue
+                
+            item_path = os.path.join(folder_path, item)
+            if os.path.isdir(item_path):
+                folders.append(item)
+            elif os.path.isfile(item_path) and item.endswith('.md'):
+                md_files.append(item)
+        
+        # 首先导入文件夹
+        for i, folder_name in enumerate(folders):
+            folder_path_full = os.path.join(folder_path, folder_name)
+            folder_id = str(uuid.uuid4())
+            
+            # 插入文件夹记录
+            cursor.execute(
+                "INSERT INTO file_mapping (id, real_name, display_name, file_path, parent_path, position, item_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (folder_id, folder_name, folder_name, folder_path_full, parent_path, i, 'folder')
+            )
+            
+            # 递归导入子文件夹
+            _import_folder_recursive(folder_path_full, folder_path_full)
+        
+        # 然后导入MD文件
+        for i, file_name in enumerate(md_files):
+            file_path_full = os.path.join(folder_path, file_name)
+            file_id = str(uuid.uuid4())
+            
+            # README.md和SUMMARY.md的真实名称和虚拟名称相同
+            if file_name in ['README.md', 'SUMMARY.md']:
+                real_name = file_name
+                display_name = file_name
+            else:
+                # 对于其他文件，使用UUID和时间戳生成真实名称
+                short_uuid = str(uuid.uuid4()).split('-')[0]
+                timestamp_suffix = str(int(time.time()))[-4:]
+                real_name = f"{short_uuid}_{timestamp_suffix}.md"
+                display_name = file_name
+            
+            # 插入文件记录
+            cursor.execute(
+                "INSERT INTO file_mapping (id, real_name, display_name, file_path, parent_path, position, item_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (file_id, real_name, display_name, file_path_full, folder_path, i, 'file')
+            )
+        
+            if real_name != file_name:
+                try:
+                    new_file_path = os.path.join(folder_path, real_name)
+                    os.rename(file_path_full, new_file_path)
+                    # 更新file_path_full为新的文件路径
+                    file_path_full = new_file_path
+                    # 更新数据库中的file_path
+                    cursor.execute(
+                        "UPDATE file_mapping SET file_path = ? WHERE id = ?",
+                        (file_path_full, file_id)
+                    )
+                except Exception as e:
+                    print(f"重命名文件 {file_path_full} 时出错: {e}")
+        # 更新父文件夹的子节点数量
+        if parent_path:
+            cursor.execute(
+                "UPDATE file_mapping SET child_count = ? WHERE file_path = ?",
+                (len(folders) + len(md_files), folder_path)
+            )
+        
+        conn.commit()
+    except Exception as e:
+        print(f"递归导入文件夹结构时出错: {e}")
+        raise
+
 # 首先，添加一个辅助函数来检查指定文件夹中是否已有相同的显示文件名
 def check_display_name_duplicate(folder_path, display_name):
     """
     检查指定文件夹中是否已有相同的显示文件名
-    :param folder_path: 文件夹路径
-    :param display_name: 显示文件名
-    :return: 如果存在重复，返回True；否则返回False
     """
     try:
         # 标准化路径
@@ -85,8 +192,8 @@ def check_display_name_duplicate(folder_path, display_name):
         
         # 查询数据库，检查是否有相同的显示文件名
         cursor.execute(
-            "SELECT COUNT(*) FROM file_mapping WHERE display_name = ? AND file_path LIKE ?",
-            (display_name, os.path.join(normalized_folder_path, '%'))
+            "SELECT COUNT(*) FROM file_mapping WHERE display_name = ? AND parent_path = ?",
+            (display_name, normalized_folder_path)
         )
         count = cursor.fetchone()[0]
         
@@ -116,6 +223,75 @@ def run_gitbook_command(command, cwd=None):
     except Exception as e:
         return -1, "", str(e)
 
+# 新增：重新排序文件/文件夹的API
+@app.route('/api/reorder-items', methods=['POST'])
+def reorder_items():
+    data = request.json
+    parent_folder_path = data.get('parentFolderPath')
+    dragged_id = data.get('draggedId')
+    target_id = data.get('targetId')
+    target_index = data.get('targetIndex')
+
+    if not all([parent_folder_path, dragged_id, target_id]):
+        return jsonify({'error': '缺少必要参数'}), 400
+
+    try:
+        # 标准化路径
+        normalized_parent_path = os.path.abspath(parent_folder_path)
+        
+        # 获取当前父文件夹下的所有项目
+        cursor.execute(
+            "SELECT id, position FROM file_mapping WHERE parent_path = ? ORDER BY position",
+            (normalized_parent_path,)
+        )
+        items = cursor.fetchall()
+        
+        # 构建ID到位置的映射
+        id_to_position = {item[0]: item[1] for item in items}
+        
+        # 检查拖动和目标项目是否存在
+        if dragged_id not in id_to_position or target_id not in id_to_position:
+            return jsonify({'error': '拖动或目标项目不存在'}), 404
+        
+        # 如果拖动的是自己，不处理
+        if dragged_id == target_id:
+            return jsonify({'success': True})
+        
+        # 获取拖动项目的当前位置
+        dragged_position = id_to_position[dragged_id]
+        
+        # 计算新的位置
+        new_position = target_index
+        
+        # 调整其他项目的位置
+        if dragged_position < new_position:
+            # 向下移动，中间的项目位置减1
+            for item_id, pos in id_to_position.items():
+                if pos > dragged_position and pos <= new_position and item_id != dragged_id:
+                    cursor.execute(
+                        "UPDATE file_mapping SET position = position - 1 WHERE id = ?",
+                        (item_id,)
+                    )
+        else:
+            # 向上移动，中间的项目位置加1
+            for item_id, pos in id_to_position.items():
+                if pos >= new_position and pos < dragged_position and item_id != dragged_id:
+                    cursor.execute(
+                        "UPDATE file_mapping SET position = position + 1 WHERE id = ?",
+                        (item_id,)
+                    )
+        
+        # 更新拖动项目的位置
+        cursor.execute(
+            "UPDATE file_mapping SET position = ? WHERE id = ?",
+            (new_position, dragged_id)
+        )
+        
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f"重新排序项目时出错: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # 新增：上传图片文件API (用于处理编辑器内粘贴或拖入的图片)
 @app.route('/api/upload-image', methods=['POST'])
@@ -332,8 +508,16 @@ def create_website_session():
         cursor.execute("SELECT session_id FROM sessions WHERE folder_path = ?", (website_folder,))
         existing_session = cursor.fetchone()
 
-        # 如果存在相同文件夹的会话，返回已有的 sessionId
+        # 如果存在相同文件夹的会话，先检查file_mapping表中是否有该文件夹的映射
         if existing_session:
+            # 检查file_mapping表中是否有该文件夹的映射
+            cursor.execute("SELECT COUNT(*) FROM file_mapping WHERE file_path = ?", (website_folder,))
+            count = cursor.fetchone()[0]
+            
+            # 如果没有映射，导入文件夹结构
+            if count == 0:
+                import_folder_structure(website_folder)
+                
             return jsonify({'sessionId': existing_session[0]})
 
         # 生成唯一 ID
@@ -342,6 +526,9 @@ def create_website_session():
         # 创建会话文件夹
         session_folder = os.path.join(USER_FOLDER, session_id)
         os.makedirs(session_folder, exist_ok=True)
+        
+        # 将文件夹结构导入到file_mapping表中
+        import_folder_structure(website_folder)
         
         cursor.execute(
             "INSERT INTO sessions (session_id, folder_name, folder_path) VALUES (?, ?, ?)",
@@ -415,62 +602,45 @@ def read_folder():
 
 # 递归读取文件夹结构
 def read_folder_structure(folder_path):
+    """
+    基于数据库构建文件树结构
+    """
     structure = []
     try:
-        items = os.listdir(folder_path)
-        item_list = []
+        # 标准化路径
+        normalized_folder_path = os.path.abspath(folder_path)
         
-        # 预加载当前目录下所有文件的映射关系
-        cursor.execute("SELECT real_name, display_name FROM file_mapping WHERE file_path LIKE ?",
-                          (os.path.join(folder_path, '%'),))
-        mappings = dict(cursor.fetchall())
+        # 从数据库中获取当前文件夹下的所有子项
+        cursor.execute(
+            "SELECT id, display_name, file_path, item_type FROM file_mapping WHERE parent_path = ? ORDER BY position",
+            (normalized_folder_path,)
+        )
+        items = cursor.fetchall()
         
         for item in items:
-            # 过滤掉 _book 文件夹
-            if item == '_book' or item == 'node_modules':
-                continue
-
-            item_path = os.path.join(folder_path, item)
-            # 获取创建时间
-            created_time = os.path.getctime(item_path)
-            # 格式化为可读时间
-            formatted_time = datetime.fromtimestamp(created_time).isoformat()
+            item_id, display_name, file_path, item_type = item
             
-            # 获取显示名称
-            display_name = mappings.get(item, item)
-            
-            if os.path.isdir(item_path):
-                # 如果是文件夹，递归读取
+            if item_type == 'folder':
+                # 如果是文件夹，递归获取其子项
                 item_info = {
-                    'id': time.time() + (hash(display_name) % 1000),
+                    'id': item_id,
                     'name': display_name,
                     'type': 'folder',
-                    'filePath': item_path,  # 添加filePath属性
-                    'createdAt': formatted_time,  # 记录创建时间
-                    'children': read_folder_structure(item_path)
-                }
-            elif os.path.isfile(item_path) and item.endswith('.md'):
-                # 只处理md文件
-                item_info = {
-                    'id': time.time() + (hash(display_name) % 1000),
-                    'name': display_name,
-                    'type': 'file',
-                    'filePath': item_path,
-                    'createdAt': formatted_time  # 记录创建时间
+                    'filePath': file_path,
+                    'children': read_folder_structure(file_path)
                 }
             else:
-                # 跳过不符合条件的项目
-                continue
-                
-            item_list.append((item_info, created_time))
-        
-        # 按创建时间排序
-        sorted_items = sorted(item_list, key=lambda x: x[1])
-        # 提取排序后的项目信息
-        structure = [item[0] for item in sorted_items]
-        
+                # 如果是文件
+                item_info = {
+                    'id': item_id,
+                    'name': display_name,
+                    'type': 'file',
+                    'filePath': file_path
+                }
+            
+            structure.append(item_info)
     except Exception as e:
-        print(f"Error reading folder structure: {e}")
+        print(f"读取文件夹结构时出错: {e}")
     return structure
 
 # 获取文件内容的API
@@ -653,26 +823,15 @@ def export_pdf():
 @app.route('/api/create-file', methods=['POST'])
 def create_file():
     data = request.json
-    target_path = data.get('folderPath')  # 修改参数名以支持文件路径
+    folder_path = data.get('folderPath')
     display_name = data.get('fileName')
-    target_type = data.get('targetType', 'folder')  # 新增参数，默认为folder
 
-    if not target_path or not display_name:
-        return jsonify({'error': '目标路径和文件名不能为空'}), 400
-
-    # 确保文件以.md结尾
-    if not display_name.endswith('.md'):
-        display_name += '.md'
+    if not folder_path or not display_name:
+        return jsonify({'error': '文件夹路径和文件名不能为空'}), 400
 
     try:
         # 标准化路径
-        normalized_path = os.path.abspath(target_path)
-        
-        # 如果目标是文件，获取其父目录作为创建路径
-        if target_type == 'file' and os.path.isfile(normalized_path):
-            normalized_folder_path = os.path.dirname(normalized_path)
-        else:
-            normalized_folder_path = normalized_path
+        normalized_folder_path = os.path.abspath(folder_path)
 
         # 检查文件夹是否存在
         if not os.path.exists(normalized_folder_path):
@@ -686,15 +845,14 @@ def create_file():
         if check_display_name_duplicate(normalized_folder_path, display_name):
             return jsonify({'error': '该名称的文件已存在'}), 400
 
-        # 生成更简短的真实文件名（使用UUID的前8位加上时间戳的最后4位）
-        short_uuid = str(uuid.uuid4()).split('-')[0]  # 获取UUID的第一部分（8位）
-        timestamp_suffix = str(int(time.time()))[-4:]  # 获取当前时间戳的最后4位
+        # 生成更简短的真实文件名
+        short_uuid = str(uuid.uuid4()).split('-')[0]
+        timestamp_suffix = str(int(time.time()))[-4:]
         real_name = f"{short_uuid}_{timestamp_suffix}.md"
         file_path = os.path.join(normalized_folder_path, real_name)
 
-        # 检查生成的简短文件名是否真的不存在（以防极低概率的碰撞）
+        # 检查生成的简短文件名是否真的不存在
         while os.path.exists(file_path):
-            # 如果发生碰撞，重新生成一个
             short_uuid = str(uuid.uuid4()).split('-')[0]
             timestamp_suffix = str(int(time.time()))[-4:]
             real_name = f"{short_uuid}_{timestamp_suffix}.md"
@@ -702,18 +860,31 @@ def create_file():
 
         # 创建新文件
         with open(file_path, 'w', encoding='utf-8') as f:
-            f.write('')  # 写入空内容
+            f.write('')
+
+        # 获取当前位置（在父文件夹中排最后）
+        cursor.execute("SELECT COUNT(*) FROM file_mapping WHERE parent_path = ?", (normalized_folder_path,))
+        position = cursor.fetchone()[0]
+        
+        # 生成随机ID
+        item_id = str(uuid.uuid4())
 
         # 存储映射关系到数据库
         cursor.execute(
-            "INSERT INTO file_mapping (real_name, display_name, file_path) VALUES (?, ?, ?)",
-            (real_name, display_name, file_path)
+            "INSERT INTO file_mapping (id, real_name, display_name, file_path, parent_path, position, item_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (item_id, real_name, display_name, file_path, normalized_folder_path, position, 'file')
+        )
+        
+        # 更新父文件夹的子节点数量
+        cursor.execute(
+            "UPDATE file_mapping SET child_count = child_count + 1 WHERE file_path = ?",
+            (normalized_folder_path,)
         )
         conn.commit()
 
-        # 返回新创建的文件信息（使用显示名称）
+        # 返回新创建的文件信息
         new_file = {
-            'id': time.time() + (hash(display_name) % 1000),
+            'id': item_id,
             'name': display_name,
             'type': 'file',
             'filePath': file_path
@@ -727,9 +898,9 @@ def create_file():
 @app.route('/api/create-folder', methods=['POST'])
 def create_new_folder():
     data = request.json
-    target_path = data.get('parentPath')  # 修改参数名以支持文件路径
+    target_path = data.get('parentPath')
     folder_name = data.get('folderName')
-    target_type = data.get('targetType', 'folder')  # 新增参数，默认为folder
+    target_type = data.get('targetType', 'folder')
 
     if not target_path or not folder_name:
         return jsonify({'error': '目标路径和文件夹名不能为空'}), 400
@@ -738,7 +909,7 @@ def create_new_folder():
         # 标准化路径
         normalized_path = os.path.abspath(target_path)
         
-        # 如果目标是文件，获取其父目录作为创建路径
+        # 获取父目录
         if target_type == 'file' and os.path.isfile(normalized_path):
             normalized_parent_path = os.path.dirname(normalized_path)
         else:
@@ -760,7 +931,7 @@ def create_new_folder():
             return jsonify({'error': '文件夹已存在'}), 400
 
         # 创建新文件夹
-        os.makedirs(new_folder_path, exist_ok=True,mode=0o777)
+        os.makedirs(new_folder_path, exist_ok=True, mode=0o777)
         os.chmod(new_folder_path, 0o777)
 
         # 自动创建README.md文件
@@ -768,12 +939,50 @@ def create_new_folder():
         with open(readme_path, 'w', encoding='utf-8') as f:
             f.write('')
 
+        # 获取当前位置（在父文件夹中排最后）
+        cursor.execute("SELECT COUNT(*) FROM file_mapping WHERE parent_path = ?", (normalized_parent_path,))
+        position = cursor.fetchone()[0]
+        
+        # 生成随机ID
+        folder_id = str(uuid.uuid4())
+        readme_id = str(uuid.uuid4())
+
+        # 存储文件夹映射关系到数据库
+        cursor.execute(
+            "INSERT INTO file_mapping (id, real_name, display_name, file_path, parent_path, position, item_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (folder_id, folder_name, folder_name, new_folder_path, normalized_parent_path, position, 'folder')
+        )
+        
+        # 存储README.md映射关系到数据库
+        cursor.execute(
+            "INSERT INTO file_mapping (id, real_name, display_name, file_path, parent_path, position, item_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (readme_id, "README.md", "README.md", readme_path, new_folder_path, 0, 'file')
+        )
+        
+        # 更新父文件夹的子节点数量
+        cursor.execute(
+            "UPDATE file_mapping SET child_count = child_count + 1 WHERE file_path = ?",
+            (normalized_parent_path,)
+        )
+        
+        # 更新新文件夹的子节点数量
+        cursor.execute(
+            "UPDATE file_mapping SET child_count = 1 WHERE id = ?",
+            (folder_id,)
+        )
+        conn.commit()
+
         # 返回新创建的文件夹信息
         new_folder = {
-            'id': time.time() + (hash(folder_name) % 1000),
+            'id': folder_id,
             'name': folder_name,
             'type': 'folder',
-            'children': []
+            'children': [{
+                'id': readme_id,
+                'name': 'README.md',
+                'type': 'file',
+                'filePath': readme_path
+            }]
         }
 
         return jsonify(new_folder)
@@ -793,7 +1002,7 @@ def upload_file():
     if not folder_path:
         return jsonify({'error': '文件夹路径不能为空'}), 400
 
-    # 如果用户没有选择文件，浏览器会提交一个空文件，这里需要检查
+    # 如果用户没有选择文件，浏览器会提交一个空文件
     if file.filename == '':
         return jsonify({'error': '没有选择文件'}), 400
 
@@ -820,15 +1029,14 @@ def upload_file():
         if check_display_name_duplicate(normalized_folder_path, display_name):
             return jsonify({'error': '该名称的文件已存在'}), 400
 
-        # 生成更简短的真实文件名（使用UUID的前8位加上时间戳的最后4位）
-        short_uuid = str(uuid.uuid4()).split('-')[0]  # 获取UUID的第一部分（8位）
-        timestamp_suffix = str(int(time.time()))[-4:]  # 获取当前时间戳的最后4位
+        # 生成更简短的真实文件名
+        short_uuid = str(uuid.uuid4()).split('-')[0]
+        timestamp_suffix = str(int(time.time()))[-4:]
         real_name = f"{short_uuid}_{timestamp_suffix}.md"
         file_path = os.path.join(normalized_folder_path, real_name)
 
-        # 检查生成的简短文件名是否真的不存在（以防极低概率的碰撞）
+        # 检查生成的简短文件名是否真的不存在
         while os.path.exists(file_path):
-            # 如果发生碰撞，重新生成一个
             short_uuid = str(uuid.uuid4()).split('-')[0]
             timestamp_suffix = str(int(time.time()))[-4:]
             real_name = f"{short_uuid}_{timestamp_suffix}.md"
@@ -837,16 +1045,29 @@ def upload_file():
         # 保存文件
         file.save(file_path)
 
+        # 获取当前位置（在父文件夹中排最后）
+        cursor.execute("SELECT COUNT(*) FROM file_mapping WHERE parent_path = ?", (normalized_folder_path,))
+        position = cursor.fetchone()[0]
+        
+        # 生成随机ID
+        item_id = str(uuid.uuid4())
+
         # 存储映射关系到数据库
         cursor.execute(
-            "INSERT INTO file_mapping (real_name, display_name, file_path) VALUES (?, ?, ?)",
-            (real_name, display_name, file_path)
+            "INSERT INTO file_mapping (id, real_name, display_name, file_path, parent_path, position, item_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (item_id, real_name, display_name, file_path, normalized_folder_path, position, 'file')
+        )
+        
+        # 更新父文件夹的子节点数量
+        cursor.execute(
+            "UPDATE file_mapping SET child_count = child_count + 1 WHERE file_path = ?",
+            (normalized_folder_path,)
         )
         conn.commit()
 
-        # 返回上传的文件信息（使用显示名称）
+        # 返回上传的文件信息
         uploaded_file = {
-            'id': time.time() + (hash(display_name) % 1000),
+            'id': item_id,
             'name': display_name,
             'type': 'file',
             'filePath': file_path
@@ -869,42 +1090,69 @@ def delete_item():
     try:
         # 标准化路径
         normalized_path = os.path.abspath(file_path)
+        
+        # 获取父文件夹路径
+        parent_path = os.path.dirname(normalized_path)
 
         # 检查路径是否存在
         if not os.path.exists(normalized_path):
             return jsonify({'error': '文件或文件夹不存在'}), 404
 
         if is_folder:
+            # 先获取该文件夹的所有子项ID
+            cursor.execute("SELECT id FROM file_mapping WHERE file_path LIKE ?", (normalized_path + '%',))
+            item_ids = [row[0] for row in cursor.fetchall()]
+            
             # 删除文件夹及其内容
-            # 先删除文件夹内所有md文件的映射
+            shutil.rmtree(normalized_path)
+            
+            # 删除数据库中的映射
+            cursor.execute("DELETE FROM file_mapping WHERE file_path LIKE ?", (normalized_path + '%',))
+            
+            # 更新父文件夹的子节点数量
             cursor.execute(
-                "DELETE FROM file_mapping WHERE file_path LIKE ?",
-                (normalized_path + '%',)
+                "UPDATE file_mapping SET child_count = child_count - 1 WHERE file_path = ?",
+                (parent_path,)
             )
+            
+            # 更新所有受影响的文件的位置
+            cursor.execute(
+                "UPDATE file_mapping SET position = position - 1 WHERE parent_path = ? AND position > (SELECT position FROM file_mapping WHERE file_path = ?)",
+                (parent_path, normalized_path)
+            )
+            
             conn.commit()
             
-            shutil.rmtree(normalized_path)
             return jsonify({'success': True, 'message': f'文件夹 {os.path.basename(normalized_path)} 已成功删除'})
         else:
-            # 删除文件
-            # 获取真实文件名
-            real_name = os.path.basename(normalized_path)
-            # 删除数据库中的映射
-            cursor.execute(
-                "DELETE FROM file_mapping WHERE real_name = ?",
-                (real_name,)
-            )
-            conn.commit()
+            # 获取文件在数据库中的记录
+            cursor.execute("SELECT id, display_name, position FROM file_mapping WHERE file_path = ?", (normalized_path,))
+            result = cursor.fetchone()
             
+            if not result:
+                return jsonify({'error': '文件不存在于数据库中'}), 404
+                
+            item_id, display_name, position = result
+
+            # 删除文件
             os.remove(normalized_path)
             
-            # 从数据库获取显示名称用于返回消息
+            # 删除数据库中的映射
+            cursor.execute("DELETE FROM file_mapping WHERE id = ?", (item_id,))
+            
+            # 更新父文件夹的子节点数量
             cursor.execute(
-                "SELECT display_name FROM file_mapping WHERE real_name = ?",
-                (real_name,)
+                "UPDATE file_mapping SET child_count = child_count - 1 WHERE file_path = ?",
+                (parent_path,)
             )
-            result = cursor.fetchone()
-            display_name = result[0] if result else real_name
+            
+            # 更新同级文件的位置
+            cursor.execute(
+                "UPDATE file_mapping SET position = position - 1 WHERE parent_path = ? AND position > ?",
+                (parent_path, position)
+            )
+            
+            conn.commit()
             
             return jsonify({'success': True, 'message': f'文件 {display_name} 已成功删除'})
     except PermissionError:
@@ -948,8 +1196,21 @@ def edit_session():
             "UPDATE sessions SET folder_name = ?, folder_path = ? WHERE session_id = ?",
             (new_name, new_folder_path, session_id)
         )
+        
+        # 更新file_mapping表中所有包含原文件夹路径的记录
+        # 1. 更新file_path包含原文件夹路径的记录
+        cursor.execute(
+            "UPDATE file_mapping SET file_path = REPLACE(file_path, ?, ?) WHERE file_path LIKE ?",
+            (old_folder_path, new_folder_path, old_folder_path + '%')
+        )
+        
+        # 2. 更新parent_path包含原文件夹路径的记录
+        cursor.execute(
+            "UPDATE file_mapping SET parent_path = REPLACE(parent_path, ?, ?) WHERE parent_path LIKE ?",
+            (old_folder_path, new_folder_path, old_folder_path + '%')
+        )
+        
         conn.commit()
-
 
         return jsonify({'success': True, 'message': '会话更新成功', 'newFolderPath': new_folder_path})
     except PermissionError:
@@ -967,17 +1228,43 @@ def delete_session():
         return jsonify({'error': '会话ID不能为空'}), 400
 
     try:
+        # 先从数据库中获取会话的文件夹路径
+        cursor.execute("SELECT folder_path FROM sessions WHERE session_id = ?", (session_id,))
+        result = cursor.fetchone()
+        
+        if result:
+            website_folder = result[0]
+            
+            # 查询该文件夹下所有文件的映射关系
+            cursor.execute(
+                "SELECT file_path, display_name FROM file_mapping WHERE file_path LIKE ? AND item_type = 'file'",
+                (website_folder + '%',)
+            )
+            files_to_rename = cursor.fetchall()
+            
+            # 将所有md文件的文件名更改为display_name
+            for file_path, display_name in files_to_rename:
+                if display_name.endswith('.md'):
+                    # 获取文件所在目录
+                    dir_path = os.path.dirname(file_path)
+                    # 构建新的文件路径
+                    new_file_path = os.path.join(dir_path, display_name)
+                    # 如果新文件名与原文件名不同，则重命名
+                    if file_path != new_file_path and os.path.exists(file_path):
+                        try:
+                            os.rename(file_path, new_file_path)
+                        except Exception as e:
+                            print(f"重命名文件时出错 {file_path} -> {display_name}: {e}")
+            
+            # 删除file_mapping表中该文件夹中的所有有关内容
+            cursor.execute("DELETE FROM file_mapping WHERE file_path LIKE ?", (website_folder + '%',))
+        
         # 从数据库中删除会话记录
         cursor.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
         conn.commit()
 
         # 删除会话文件夹
         session_folder = os.path.join(USER_FOLDER, session_id)
-        os.makedirs(session_folder, exist_ok=True,mode=0o777)
-        
-        # 确保文件夹有正确的权限
-        os.chmod(session_folder, 0o777)
-
         if os.path.exists(session_folder) and os.path.isdir(session_folder):
             shutil.rmtree(session_folder)
 
@@ -1086,7 +1373,7 @@ def generate_summary_md(folder_path):
     """
     content = ['# Summary']
     
-    # 获取文件夹结构
+    # 获取文件夹结构（基于数据库）
     structure = read_folder_structure(folder_path)
     
     # 先处理根目录的README.md，放在最前面
@@ -1109,44 +1396,28 @@ def generate_summary_md(folder_path):
     
     # 递归遍历文件夹结构，生成目录内容
     def traverse_structure(items, level=0, parent_is_top_level=False):
-        # 用于标记当前文件夹中是否已处理过README.md文件
-        has_readme = False
-        
-        # 先收集README.md文件
-        readme_file = None
-        
         for item in items:
             # 忽略_book和node_modules文件夹
             if item['type'] == 'folder' and item['name'] in ['_book', 'node_modules']:
                 continue
 
-            # 跳过根目录的README.md，因为已经单独处理过了
-            if level == 0 and item['type'] == 'file' and item['name'] == 'README.md':
-                readme_file = item
-                has_readme = True
+            # 跳过所有README.md文件，因为它们只会作为文件夹的链接出现
+            if item['type'] == 'file' and item['name'] == 'README.md':
                 continue
-            elif item['type'] == 'file' and item['name'] == 'README.md':
-                # 保存子目录的README.md文件
-                readme_file = item
-                has_readme = True
+            
             elif item['type'] == 'file' and item['name'].endswith('.md') and item['name'] != 'SUMMARY.md':
                 # 计算显示层级
                 display_level = 0
-                if level <= 1 and parent_is_top_level:
-                    # 根目录或根目录下第一层文件夹中的文件
+                if level == 0 and parent_is_top_level:
+                    # 根目录中的文件
                     display_level = 0
+                elif level == 1 and parent_is_top_level:
+                    # 根目录下第一层文件夹中的文件
+                    display_level = 1
                 else:
                     # 其他层级的文件
                     display_level = level
-                     
-                # 对于非README.md文件，如果当前文件夹有README.md，则显示层级+1
-                if level > 0:
-                    # 检查当前文件夹是否有README.md
-                    for sibling in items:
-                        if sibling['type'] == 'file' and sibling['name'] == 'README.md':
-                            display_level += 1
-                            break
-                 
+                      
                 # 计算缩进空格数
                 indent = ' ' * (2 * display_level)
                 # 计算相对路径（相对于根目录）
@@ -1173,12 +1444,12 @@ def generate_summary_md(folder_path):
                         folder_readme_path = os.path.relpath(child['filePath'], folder_path)
                         break
                 
-                # 添加文件夹名称到目录，如果有README.md则链接到README.md
+                # 添加文件夹名称到目录，链接始终指向README.md（如果存在）
                 if folder_has_readme:
                     # 文件夹有README.md，链接指向README.md
                     content.append(f'{indent}* [{folder_name}]({folder_readme_path.replace(os.sep, "/")})')
                 else:
-                    # 文件夹没有README.md，保持原有方式
+                    # 文件夹没有README.md，使用普通文件夹格式
                     content.append(f'{indent}* {folder_name}')
                 
                 # 递归处理子文件夹内容
@@ -1186,8 +1457,6 @@ def generate_summary_md(folder_path):
                     # 标记是否是根目录下的第一层文件夹
                     is_top_level_folder = level == 0
                     traverse_structure(item['children'], level + 1, is_top_level_folder)
-        
-        # 对于子目录的README.md，已经在文件夹链接中处理，不需要单独添加
     
     # 开始遍历
     traverse_structure(structure)
