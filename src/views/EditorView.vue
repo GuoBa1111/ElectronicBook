@@ -368,7 +368,6 @@ onUnmounted(() => {
         <button class="export-summary-btn" @click="handleExportSummary">①导出目录</button>
         <button class="export-btn" @click="exportBook">②保存并发布</button>
         <button class="preview-btn" @click="previewBook">③预览</button>
-        <button class="pdf-btn" @click="exportPDF">导出PDF</button>
         <button class="back-btn" @click="goToHome">返回主界面</button>
       </div>
     </div>
